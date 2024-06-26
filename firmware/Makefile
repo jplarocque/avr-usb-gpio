@@ -13,8 +13,8 @@ FUSE_L  = 0xE1
 FUSE_H  = 0xDD
 AVRDUDE = avrdude -c usbasp  -p $(DEVICE)
 
-CFLAGS  = -Iusbdrv -I. -DDEBUG_LEVEL=0
-OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o main.o
+CFLAGS  = -Iv-usb/usbdrv -I. -DDEBUG_LEVEL=0
+OBJECTS = v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o v-usb/usbdrv/oddebug.o main.o
 
 COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
 
@@ -123,7 +123,7 @@ flash: main.hex
 
 # rule for deleting dependent files (those which can be built by Make):
 clean:
-	rm -f main.hex main.lst main.obj main.cof main.list main.map main.eep.hex main.elf *.o usbdrv/*.o main.s usbdrv/oddebug.s usbdrv/usbdrv.s
+	rm -f main.hex main.lst main.obj main.cof main.list main.map main.eep.hex main.elf *.o v-usb/usbdrv/*.o main.s v-usb/usbdrv/oddebug.s v-usb/usbdrv/usbdrv.s
 
 # Generic rule for compiling C files:
 .c.o:
@@ -143,11 +143,7 @@ clean:
 
 # file targets:
 
-# Since we don't want to ship the driver multipe times, we copy it into this project:
-usbdrv:
-	cp -r ../../../usbdrv .
-
-main.elf: usbdrv $(OBJECTS)	# usbdrv dependency only needed because we copy it
+main.elf: $(OBJECTS)
 	$(COMPILE) -o main.elf $(OBJECTS)
 
 main.hex: main.elf
