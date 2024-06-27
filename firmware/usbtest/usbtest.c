@@ -146,7 +146,11 @@ int main(int argc, char **argv)
         exit(1);
      }
 
-   handle = usbOpenDevice(USB_VENDOR_ID, "ami", USB_DEVICE_ID, "GPIO-12");
+   static const char
+       vendor_name[USB_CFG_VENDOR_NAME_LEN + 1] = {USB_CFG_VENDOR_NAME, '\0'},
+       device_name[USB_CFG_DEVICE_NAME_LEN + 1] = {USB_CFG_DEVICE_NAME, '\0'};
+   handle = usbOpenDevice(USB_VENDOR_ID, vendor_name,
+                          USB_DEVICE_ID, device_name);
 
    if(handle == NULL)
      {
