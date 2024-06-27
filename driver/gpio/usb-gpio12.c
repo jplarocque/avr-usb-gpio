@@ -24,7 +24,7 @@
 #include <linux/device.h>
 #include <linux/usb.h>
 #include <linux/slab.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/spinlock.h>
 
 #include "../../firmware/common.h"
