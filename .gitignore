@@ -8,5 +8,5 @@
 *.hex
 *.elf
 a.out
-usbtest
+firmware/usbtest/usbtest
 on_off
