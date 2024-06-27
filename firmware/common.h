@@ -36,35 +36,13 @@ typedef struct __attribute__((__packed__)) _gpiopktheader
    gpio_info gpio;
 } gpiopktheader;
 
-typedef struct __attribute__((__packed__)) _spipktheader
-{
-   uint8_t command;
-   uint8_t data;
-   uint8_t speed; //future;
-} spipktheader;
-
-typedef struct __attribute__((__packed__)) _adcpktheader
-{
-   uint8_t command;
-   uint8_t gpio_no; //C0 -- C5
-   uint16_t data; //ADC data is 12 bits (0 - 1024)
-   uint8_t speed; //Future
-} adcpktheader;
-
 typedef enum _command
 {
    BOARD_INIT, // This does the init of board
-   BOARD_RESET, // This restarts the board
    GPIO_INPUT, // Set GPIO as input
    GPIO_OUTPUT, // Set GPIO as output
    GPIO_READ,   // Read GPIO
    GPIO_WRITE, // Write to GPIO
-   SPI_INIT,  // Initialize SPI
-   SPI_DATA,  // Send data over SPI
-   SPI_END,  // End spi connection
-   ADC_INIT, // Initialize ADC
-   ADC_READ, // Read ADC value from ADC pin (C0 - C5)
-   ADC_END,  // End ADC
 } command;
 
 

@@ -141,12 +141,7 @@ int main(int argc, char **argv)
         printf("\tusbtest on gpiono\n");
         printf("\tusbtest off gpiono\n");
         printf("\tusbtest read gpiono\n");
-        printf("\tusbtest reboot\n");
-        printf("\tubstest spiinit\n");
-        printf("\tusbtest spiend\n");
-        printf("\tusbtest spidata data\n");
         printf("\tusbtest gpiotest no\n");
-        printf("\tubstest adcread adc_gpio_no (0 - 5)\n\n");
         exit(1);
      }
 
@@ -201,91 +196,6 @@ int main(int argc, char **argv)
         printf("gpio value: %d\n", pkt->gpio.data);
 
      }
-   else if (strcmp(argv[1], "reboot") == 0)
-     {
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 BOARD_RESET, 0, 0,
-                                 0, 0, 5000);
-        printf("bytes: %d\n", nBytes);
-        if (nBytes == -32)
-          {
-             printf("Board is rebooted....\n");
-          }
-     }
-
-   else if(!strcmp(argv[1], "spiinit"))
-     {
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 SPI_INIT, 0, 0,
-                                 buffer, 3, 5000);
-        printf("bytes: %d\n", nBytes);
-     }
-   else if (!strcmp(argv[1], "spiend"))
-     {
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 SPI_END, 0, 0,
-                                 buffer, 3, 5000);
-        printf("bytes: %d\n", nBytes);
-     }
-   else if (!strcmp(argv[1], "spidata"))
-     {
-        char *data_str = argv[2];
-        unsigned char spi_data = atoi(data_str);
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 SPI_INIT, 0, 0,
-                                 0, 0, 5000);
-        printf("spi_init: bytes: %d\n", nBytes);
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 SPI_DATA, 0 | (spi_data << 8), 0,
-                                 buffer, 3, 5000);
-        printf("spi_data: bytes: %d\n", nBytes);
-        printf("output:- %x:%x:%x\n", buffer[0], buffer[1], buffer[2]);
-
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 SPI_END, 0, 0,
-                                 0, 0, 5000);
-        printf("spi_end: bytes: %d\n", nBytes);
-     }
-   else if (!strcmp(argv[1], "spitest"))
-     {
-        char *data_str = argv[2];
-        unsigned char spi_data = atoi(data_str);
-        printf("spi data to be send %d\n", spi_data);
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 SPI_INIT, 0, 0,
-                                 buffer, 3, 5000);
-        printf("spi_init: bytes: %d\n", nBytes);
-
-        int i = 0;
-
-        for (; i < 1000000; ++i)
-          {
-             printf("spi data to be send %d\n", spi_data);
-             memset(buffer, 0, 3);
-             nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                      SPI_DATA, 0 | (spi_data << 8), 0,
-                                      buffer, 3, 5000);
-             printf("spi_data: bytes: %d\n", nBytes);
-
-             //uint8_t val = buffer[2];
-             printf("output: %x: %x, %x\n", buffer[0], buffer[1], buffer[2]);
-             memset(buffer, 0, 3);
-             sleep(1);
-             printf("spi data to be send 0\n");
-
-             nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                      SPI_DATA, 0 << 8, 0,
-                                      buffer, 3, 5000);
-             printf("spi_data: bytes: %d\n", nBytes);
-
-             printf("output - down: %x: %x, %x\n\n", buffer[0], buffer[1], buffer[2]);
-             sleep(1);
-          }
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 SPI_END, 0, 0,
-                                 buffer, 3, 5000);
-        printf("spi_end: bytes: %d\n", nBytes);
-     }
    else if (!strcmp(argv[1], "gpiotest"))
      {
         int i = 0;
@@ -304,27 +214,6 @@ int main(int argc, char **argv)
                                       buffer, 10, 5000);
              //usleep(400000);
           }
-     }
-   else if (!strcmp(argv[1], "adcread"))
-     {
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 ADC_INIT, 0, 0,
-                                 buffer, 1, 1000);
-        printf("adc_int: bytes: %d\n", nBytes);
-
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 ADC_READ, gpio_number, 0,
-                                 buffer, 5, 1000);
-        printf("adc_read: bytes: %d\n", nBytes);
-
-        adcpktheader *adc_info = (adcpktheader *)buffer;
-        printf("ADC pin %d read value: %d\n", adc_info->gpio_no, adc_info->data);
-
-        nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 ADC_END, 0, 0,
-                                 buffer, 1, 1000);
-        printf("adc_end: bytes: %d\n", nBytes);
-
      }
 
 

@@ -37,16 +37,6 @@ PB5          |   12
 PB6          |   Not available (used by crystal)
 PB7          |   Not available (used by crystal)
 
-#### ADC pins
-Atmega8 ADC pin | pin number
---------------- | ------------
-PC0             |   0
-PC1             |   1
-PC2             |   2
-PC3             |   3
-PC4             |   4
-PC5             |   5
-
 ### how to access gpio port as linux kernel sysfs
 You need to load the kernel driver for this.
 
@@ -86,35 +76,13 @@ typedef struct __attribute__((__packed__)) _gpiopktheader
    gpio_info gpio;
 } gpiopktheader;
 
-typedef struct __attribute__((__packed__)) _spipktheader
-{
-   uint8_t command;
-   uint8_t data;
-   uint8_t speed; //future;
-} spipktheader;
-
-typedef struct __attribute__((__packed__)) _adcpktheader
-{
-   uint8_t command;
-   uint8_t gpio_no; //C0 -- C5
-   uint16_t data; //ADC data is 12 bits (0 - 1024)
-   uint8_t speed; //Future
-} adcpktheader;
-
 typedef enum _command
 {
    BOARD_INIT, // This does the init of board
-   BOARD_RESET, // This restarts the board
    GPIO_INPUT, // Set GPIO as input
    GPIO_OUTPUT, // Set GPIO as output
    GPIO_READ,   // Read GPIO
    GPIO_WRITE, // Write to GPIO
-   SPI_INIT,  // Initialize SPI
-   SPI_DATA,  // Send data over SPI
-   SPI_END,  // End spi connection
-   ADC_INIT, // Initialize ADC
-   ADC_READ, // Read ADC value from ADC pin (C0 - C5)
-   ADC_END,  // End ADC
 } command;
 
 ```
@@ -165,53 +133,6 @@ gpiopktheader *reply = (gpiopktheader *)buffer;
 uint8_t gpio_read_val = reply->val;
 ```
 
-- Reset Board
-```C
-uint8_t buffer[3];
-usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                        BOARD_RESET, 0, 0, buffer, 3, 1000);
-gpiopktheader *reply = (gpiopktheader *)buffer;
-```
-
-- SPI communication
-
-```C
-uint8_t spi_data = 111;
-
-nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 SPI_INIT, 0, 0, 0, 0, 5000);
-
-nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                         SPI_DATA, 0 | (spi_data << 8), 0,
-                         buffer, 3, 5000);
-spipktheader *spi_info = (spipktheader *) buffer;
-printf("MOSI data: %d", spi_info->data);
-
-nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                         SPI_END, 0, 0,
-                         0, 0, 5000);
-```
-
-- ADC
-
-```C
-
-nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                                 ADC_INIT, 0, 0,
-                                 buffer, 1, 1000);
-
-nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                        ADC_READ, gpio_number, 0,
-                        buffer, 5, 1000);
-
-adcpktheader *adc_info = (adcpktheader *)buffer;
-printf("ADC pin %d read value: %d\n", adc_info->gpio_no, adc_info->data);
-
-nBytes = usb_control_msg(handle, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_IN,
-                         ADC_END, 0, 0,
-                         buffer, 1, 1000);
-```
-
 you can look into [ubstest](https://raw.githubusercontent.com/amitesh-singh/usb-gpio-board/master/firmware/usbtest/usbtest.c) example for more details.
 #### example
 - [on-off](https://raw.githubusercontent.com/amitesh-singh/usb-gpio-board/master/examples/on-off/on-off.c)  
@@ -220,23 +141,16 @@ you can look into [ubstest](https://raw.githubusercontent.com/amitesh-singh/usb-
 
 GPIO write speed is close to 1Khz.
 ![GPIO write speed - logic analyzer](./photos/gpio_write_speed.png)
+
 ### TODOs
  - ~~write firmware~~ **DONE**
  - ~~write basic gpio driver~~ **DONE**
  - ~~Add support of spin locking in gpio driver.~~ **DONE**
- - Add support of spi bitbang driver.
- - ~~Add support of spi hw in firmware.~~ **DONE**
- - Add support of spi hw driver.
- - Add support of i2c in firmware.
- - Add support of i2c driver.
- - ~~Add adc support in firmware.~~  **DONE**
- - Add adc driver support.
  - Add PWM pins support.
  - Add PWM driver?.
  - Add UART support.
  - Add UART ttyUSB driver support.
  - design schematic.
-
 
 ## Links
  - how to make nice pinouts: http://www.pighixxx.com/test/?s=made+a+pinout

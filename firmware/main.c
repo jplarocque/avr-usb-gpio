@@ -35,9 +35,6 @@
 #define AVR_USB_FIRMWARE
 #include "common.h"
 
-#include "spi.h"
-#include "adc.h"
-
 static uint8_t replybuf[5];
 
 static inline uint8_t _adjust_gpio(uint8_t no)
@@ -144,29 +141,6 @@ usbFunctionSetup(uchar data[8])
          //blink leds etcs ? we could use some port for blinking? not sure?
          break;
 
-      case SPI_INIT:
-         spi_init();
-
-         len = 1;
-         break;
-
-      case SPI_DATA:
-         replybuf[1] = spi_send(rq->wValue.bytes[1]);
-
-         len = 3;
-         break;
-
-      case SPI_END:
-         spi_end();
-
-         len = 1;
-         break;
-
-      case BOARD_RESET:
-         while(1); // watchdog will reset the board.
-
-         break;
-
       case GPIO_INPUT:
          replybuf[1] = rq->wValue.bytes[0]; // gpio no
          _gpio_init(replybuf[1], 1);
@@ -194,29 +168,6 @@ usbFunctionSetup(uchar data[8])
          _gpio_access(replybuf[1], 1, &replybuf[2]);
 
          len = 3;
-         break;
-
-      case ADC_INIT:
-         adc_init();
-
-         len = 1;
-         break;
-      case ADC_READ:
-           {
-              uint16_t adc_val;
-              replybuf[1] = rq->wValue.bytes[0]; // ADC gpio no ( 0 - 5)
-              adc_val = adc_read(rq->wValue.bytes[0]);
-              replybuf[2] = adc_val & 0xFF;
-              replybuf[3] = (adc_val >> 8);
-
-              len = 4;
-           }
-         break;
-
-      case ADC_END:
-         adc_end();
-
-         len = 1;
          break;
 
       default:
