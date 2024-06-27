@@ -196,8 +196,15 @@ my_usb_probe(struct usb_interface *interface,
    struct my_usb *data;
    int ret;
 
+   static const char
+       vendor_name[USB_CFG_VENDOR_NAME_LEN + 1] = {USB_CFG_VENDOR_NAME, '\0'},
+       device_name[USB_CFG_DEVICE_NAME_LEN + 1] = {USB_CFG_DEVICE_NAME, '\0'};
    printk(KERN_INFO "manufacturer: %s", udev->manufacturer);
    printk(KERN_INFO "product: %s", udev->product);
+   if (! (strcmp(udev->manufacturer, vendor_name) == 0 &&
+          strcmp(udev->product, device_name) == 0)) {
+       return -ENODEV;
+   }
 
    iface_desc = interface->cur_altsetting;
    printk(KERN_INFO "GPIO-12 board %d probed: (%04X:%04X)",
