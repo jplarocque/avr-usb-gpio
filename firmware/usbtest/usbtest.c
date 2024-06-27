@@ -26,6 +26,7 @@
 #define AVR_USB_FIRMWARE
 
 #include "../common.h"
+#include "../usbconfig.h"
 
 // used to get descriptor strings for device identification 
 static int usbGetDescriptorString(usb_dev_handle *dev, int index, int langid, 
@@ -145,7 +146,7 @@ int main(int argc, char **argv)
         exit(1);
      }
 
-   handle = usbOpenDevice(0x16C0, "ami", 0x03E8, "GPIO-12");
+   handle = usbOpenDevice(USB_VENDOR_ID, "ami", USB_DEVICE_ID, "GPIO-12");
 
    if(handle == NULL)
      {

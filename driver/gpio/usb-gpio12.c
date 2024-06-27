@@ -28,6 +28,7 @@
 #include <linux/spinlock.h>
 
 #include "../../firmware/common.h"
+#include "../../firmware/usbconfig.h"
 
 /*
  * usb_control_msg(struct usb_device *dev, unsigned int pipe,
@@ -283,10 +284,8 @@ my_usb_disconnect(struct usb_interface *interface)
    kfree(data);
 }
 
-#define MY_USB_VENDOR_ID 0x16c0
-#define MY_USB_PRODUCT_ID 0x03e8
 static struct usb_device_id my_usb_table[] = {
-       { USB_DEVICE(MY_USB_VENDOR_ID, MY_USB_PRODUCT_ID) },
+       { USB_DEVICE(USB_VENDOR_ID, USB_DEVICE_ID) },
        {},
 };
 
