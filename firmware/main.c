@@ -24,6 +24,7 @@
  *	PB0  - PB5 (excluding PB6 and PB7)  = 6
  */
 
+#include <stdbool.h>
 #include <avr/io.h>
 #include <avr/wdt.h>
 #include <avr/interrupt.h>
@@ -35,86 +36,95 @@
 #define AVR_USB_FIRMWARE
 #include "common.h"
 
+#define ARRAYLEN(array) (sizeof ((array)) / sizeof ((array)[0]))
+
 static uint8_t replybuf[5];
 
-static inline uint8_t _adjust_gpio(uint8_t no)
-{
-   if (no == 3) no = 4;
-   else if (no == 4) no = 6;
-   else if (no == 5) no = 7;
-   else if (no == 6) no = 8;
-   return no;
+static inline volatile uint8_t *
+PORTx(volatile uint8_t *base) {
+    return base - 0;
+}
+
+static inline volatile uint8_t *
+DDRx(volatile uint8_t *base) {
+    return base - 1;
+}
+
+static inline volatile uint8_t *
+PINx(volatile uint8_t *base) {
+    return base - 2;
+}
+
+#define TABENT(port, bit) (((port) << 3) | (bit))
+#define PORT_A 0
+#define PORT_B 1
+#define PORT_C 2
+#define PORT_D 3
+
+static const PROGMEM uint8_t gpiotab[] = {
+    /* List the defined entries contiguously to easily find the index of an
+       entry by its line number: */
+    TABENT(PORT_B, 0),
+    TABENT(PORT_B, 1),
+    TABENT(PORT_B, 2),
+    TABENT(PORT_B, 3),
+    TABENT(PORT_B, 4),
+    TABENT(PORT_B, 5),
+    TABENT(PORT_C, 0),
+    TABENT(PORT_C, 1),
+    TABENT(PORT_C, 2),
+    TABENT(PORT_C, 3),
+    TABENT(PORT_C, 4),
+    TABENT(PORT_C, 5),
+    TABENT(PORT_D, 0),
+    TABENT(PORT_D, 1),
+    TABENT(PORT_D, 3),
+    TABENT(PORT_D, 5),
+    TABENT(PORT_D, 6),
+    TABENT(PORT_D, 7),
+    /* Undefined entries due to pin conflicts or other reasons: */
+    //TABENT(PORT_B, 6), // XTAL1
+    //TABENT(PORT_B, 7), // XTAL2
+    //TABENT(PORT_C, 6), // /Reset
+    //TABENT(PORT_D, 2), // INT0, D+
+    //TABENT(PORT_D, 4), // D-
+};
+
+static bool
+gpio_base_and_mask(volatile uint8_t **base, uint8_t *mask, uint8_t no) {
+    if (no < ARRAYLEN(gpiotab)) {
+        uint8_t tabent = pgm_read_byte(&gpiotab[no]);
+        uint8_t port_no = tabent >> 3, bit_no = tabent & 0b111;
+        *base = &PORTB + 3 - 3 * port_no;
+        *mask = 1 << bit_no;
+        return true;
+    } else {
+        return false;
+    }
 }
 
 static void
 _gpio_init(uint8_t no, uint8_t input)
 {
-   switch (no)
-     {
-      case 1 ... 6:
-         //some adjustments since PD2 and PD4 are not available.
-         if (no > 2)
-           no = _adjust_gpio(no);
-
-         if (!input)
-           DDRD |= (1 << (no - 1));
-         else
-           DDRD &= ~(1 << (no - 1));
-         break;
-      case 7 ... 12:
-         if (!input)
-           DDRB |= (1 << (no - 7));
-         else
-           DDRB &= ~(1 << (no - 7));
-         break;
-      default:
-         break;
-     }
+    volatile uint8_t *base;
+    uint8_t mask;
+    if (! gpio_base_and_mask(&base, &mask, no)) return;
+    if (input) *DDRx(base) &= ~mask;
+    else *DDRx(base) |= mask;
 }
 
 static void
 _gpio_access(uint8_t no, uint8_t write, uint8_t *val)
 {
-   switch(no)
-     {
-      case 1 ... 6:
-         if (no > 2)
-           no = _adjust_gpio(no);
-
-         if (write)
-           {
-              if (*val)
-                PORTD |= (1 << (no - 1));
-              else
-                PORTD &= ~(1 << (no - 1));
-           }
-         else
-           {
-              if (bit_is_clear(PIND, (no - 1)))
-                *val = 0;
-              else
-                *val = 1;
-           }
-         break;
-      case 7 ... 12:
-         if (write)
-           {
-              if  (*val)
-                PORTB |= (1 << (no - 7));
-              else
-                PORTB &= ~(1 << (no - 7));
-           }
-         else
-           {
-              if (bit_is_clear(PINB, (no - 7)))
-                *val = 0;
-              else
-                *val = 1;
-           }
-         break;
-      default:
-         break;
-     }
+    volatile uint8_t *base;
+    uint8_t mask;
+    if (! gpio_base_and_mask(&base, &mask, no)) return;
+    if (write) {
+        if (*val) *PORTx(base) |= mask;
+        else *PORTx(base) &= ~mask;
+    } else {
+        *val = !!(*PINx(base) & mask);
+    }
 }
 
 /*
@@ -137,7 +147,8 @@ usbFunctionSetup(uchar data[8])
       case BOARD_INIT:
 
          //do board init stuffs,
-         len = 1;
+         len = 2;
+         replybuf[1] = ARRAYLEN(gpiotab);
          //blink leds etcs ? we could use some port for blinking? not sure?
          break;
 

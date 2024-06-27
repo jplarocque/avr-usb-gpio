@@ -1,6 +1,6 @@
 ### GPIO-12 board
 
-This is a gpio over usb board based on [VUSB](https://www.obdev.at/products/vusb/index.html) stack for AVR atmega8 chip. It exposes 12 GPIO ports.
+This is a gpio over usb board based on [VUSB](https://www.obdev.at/products/vusb/index.html) stack for AVR atmega8 chip. It exposes 18 GPIO lines.
 
 My current prototype uses [USBPrayog Board](http://rarecomponents.com/store/1411?search=prayog) from
 [rarecomponents.com](http://rarecomponents.com).
@@ -20,22 +20,29 @@ I shall produce an exclusive kicad schematic for this board soon.
 #### GPIO pins
 Atmega8 gpio | pin number
 -------------| ------------
-PD0          |   1
-PD1          |   2
-PD2          |   Not available (used as D+)
-PD3          |   3
-PD4          |   Not available (used as D-)
-PD5          |   4
-PD6          |   5
-PD7          |   6
-PB0          |   7
-PB1          |   8
-PB2          |   9
-PB3          |   10
-PB4          |   11
-PB5          |   12
+PB0          |   0
+PB1          |   1
+PB2          |   2
+PB3          |   3
+PB4          |   4
+PB5          |   5
 PB6          |   Not available (used by crystal)
 PB7          |   Not available (used by crystal)
+PC0          |   6
+PC1          |   7
+PC2          |   8
+PC3          |   9
+PC4          |   10
+PC5          |   11
+PC6          |   Not available (used for /Reset)
+PD0          |   12
+PD1          |   13
+PD2          |   Not available (used as D+)
+PD3          |   14
+PD4          |   Not available (used as D-)
+PD5          |   15
+PD6          |   16
+PD7          |   17
 
 ### how to access gpio port as linux kernel sysfs
 You need to load the kernel driver for this.

@@ -64,13 +64,13 @@ _gpioa_set(struct gpio_chip *chip,
    ret = usb_control_msg(data->udev,
                          usb_sndctrlpipe(data->udev, 0),
                          GPIO_WRITE, USB_TYPE_VENDOR | USB_DIR_OUT,
-                         (offset + 1) | (gpio_val << 8), 0,
+                         offset | (gpio_val << 8), 0,
                          0, 0,
                          data->timeout);
    ret = usb_control_msg(data->udev,
                          usb_rcvctrlpipe(data->udev, 0),
                          GPIO_WRITE, USB_TYPE_VENDOR | USB_DIR_IN,
-                         (offset + 1) | (gpio_val << 8), 0,
+                         offset | (gpio_val << 8), 0,
                          (u8 *)data->buf, 3,
                          data->timeout);
    spin_unlock(&data->lock);
@@ -93,13 +93,13 @@ _gpioa_get(struct gpio_chip *chip,
    ret = usb_control_msg(data->udev,
                          usb_sndctrlpipe(data->udev, 0),
                          GPIO_READ, USB_TYPE_VENDOR | USB_DIR_OUT,
-                         (offset + 1), 0,
+                         offset, 0,
                          0, 0,
                          data->timeout);
    ret = usb_control_msg(data->udev,
                          usb_rcvctrlpipe(data->udev, 0),
                          GPIO_READ, USB_TYPE_VENDOR | USB_DIR_IN,
-                         (offset + 1), 0,
+                         offset, 0,
                          (u8 *)data->buf, 3,
                          data->timeout);
    spin_unlock(&data->lock);
@@ -127,7 +127,7 @@ _direction_output(struct gpio_chip *chip,
    ret = usb_control_msg(data->udev,
                          usb_sndctrlpipe(data->udev, 0),
                          GPIO_OUTPUT, USB_TYPE_VENDOR | USB_DIR_OUT,
-                         (offset + 1), 0,
+                         offset, 0,
                          0, 0,
                          data->timeout);
    if (ret != 0)
@@ -137,7 +137,7 @@ _direction_output(struct gpio_chip *chip,
    ret = usb_control_msg(data->udev,
                          usb_rcvctrlpipe(data->udev, 0),
                          GPIO_OUTPUT, USB_TYPE_VENDOR | USB_DIR_IN,
-                         (offset + 1), 0,
+                         offset, 0,
                          (u8 *)data->buf, 3,
                          data->timeout);
 
@@ -163,7 +163,7 @@ _direction_input(struct gpio_chip *chip,
    ret = usb_control_msg(data->udev,
                          usb_sndctrlpipe(data->udev, 0),
                          GPIO_INPUT, USB_TYPE_VENDOR | USB_DIR_OUT,
-                         (offset + 1), 0,
+                         offset, 0,
                          0, 0,
                          data->timeout);
    if (ret != 0)
@@ -173,7 +173,7 @@ _direction_input(struct gpio_chip *chip,
    ret = usb_control_msg(data->udev,
                          usb_rcvctrlpipe(data->udev, 0),
                          GPIO_INPUT, USB_TYPE_VENDOR | USB_DIR_IN,
-                         (offset + 1), 0,
+                         offset, 0,
                          (u8 *)data->buf, 3,
                          data->timeout);
    spin_unlock(&data->lock);
@@ -206,11 +206,6 @@ my_usb_probe(struct usb_interface *interface,
        return -ENODEV;
    }
 
-   iface_desc = interface->cur_altsetting;
-   printk(KERN_INFO "GPIO-12 board %d probed: (%04X:%04X)",
-          iface_desc->desc.bInterfaceNumber, id->idVendor, id->idProduct);
-   printk(KERN_INFO "bNumEndpoints: %d", iface_desc->desc.bNumEndpoints);
-
    data = kzalloc(sizeof(struct my_usb), GFP_KERNEL);
    if (data == NULL)
      {
@@ -225,8 +220,6 @@ my_usb_probe(struct usb_interface *interface,
    data->chip.parent = &data->udev->dev; // optional device providing the GPIOs
    data->chip.owner = THIS_MODULE; // helps prevent removal of modules exporting active GPIOs, so this is required for proper cleanup
    data->chip.base = -1;
-   data->chip.ngpio = 12; /* 12 GPIO pins, PD0, PD1, PD3, PD5, PD6, PD7 (1 - 6);
-                             PB0, PB1, PB2, PB3, PB4, PB5 (7 - 12) */
    data->chip.can_sleep = false;
 
    data->chip.set = _gpioa_set;
@@ -235,12 +228,6 @@ my_usb_probe(struct usb_interface *interface,
    data->chip.direction_input = _direction_input;
    data->chip.direction_output = _direction_output;
    data->timeout = 100;
-
-   if (gpiochip_add(&data->chip) < 0)
-   {
-	   printk(KERN_ALERT "Failed to add gpio chip");
-	   return -ENODEV;
-   }
 
    usb_set_intfdata(interface, data);
 
@@ -265,12 +252,26 @@ my_usb_probe(struct usb_interface *interface,
                          data->timeout);
    spin_unlock(&data->lock);
 
-   if (ret != sizeof(gpiopktheader) - 2)
+   if (ret != 2)
      {
         printk(KERN_ALERT "ret = %d, func= %s Failed to get correct reply", ret, __func__);
         return -EREMOTEIO;
      }
 
+   data->chip.ngpio = data->buf[1];
+
+   iface_desc = interface->cur_altsetting;
+   printk(KERN_INFO "GPIO-12 board %d probed: (%04X:%04X)",
+          iface_desc->desc.bInterfaceNumber, id->idVendor, id->idProduct);
+   printk(KERN_INFO "bNumEndpoints: %d", iface_desc->desc.bNumEndpoints);
+   printk(KERN_INFO "ngpio: %d", data->chip.ngpio);
+   
+   if (gpiochip_add(&data->chip) < 0)
+   {
+	   printk(KERN_ALERT "Failed to add gpio chip");
+	   return -ENODEV;
+   }
+   
    return 0;
 }
 
