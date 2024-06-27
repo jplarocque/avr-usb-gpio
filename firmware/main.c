@@ -89,18 +89,23 @@ _gpio_init(uint8_t no, uint8_t input)
     else *DDRx(base) |= mask;
 }
 
-static void
-_gpio_access(uint8_t no, uint8_t write, uint8_t *val)
+static bool
+_gpio_read(uint8_t no)
 {
     volatile uint8_t *base;
     uint8_t mask;
     if (! gpio_base_and_mask(&base, &mask, no)) return;
-    if (write) {
-        if (*val) *PORTx(base) |= mask;
-        else *PORTx(base) &= ~mask;
-    } else {
-        *val = !!(*PINx(base) & mask);
-    }
+    return *PINx(base) & mask;
+}
+
+static void
+_gpio_write(uint8_t no, bool value)
+{
+    volatile uint8_t *base;
+    uint8_t mask;
+    if (! gpio_base_and_mask(&base, &mask, no)) return;
+    if (value) *PORTx(base) |= mask;
+    else *PORTx(base) &= ~mask;
 }
 
 /*
@@ -144,7 +149,7 @@ usbFunctionSetup(uchar data[8])
 
       case GPIO_READ:
          replybuf[1] = rq->wValue.bytes[0]; // gpio no
-         _gpio_access(replybuf[1], 0, &replybuf[2]); //this populates gpio value
+         replybuf[2] = _gpio_read(replybuf[1]); //this populates gpio value
 
          len = 3;
          break;
@@ -152,7 +157,7 @@ usbFunctionSetup(uchar data[8])
       case GPIO_WRITE:
          replybuf[1] = rq->wValue.bytes[0]; //gpio no.
          replybuf[2] = rq->wValue.bytes[1]; // gpio value
-         _gpio_access(replybuf[1], 1, &replybuf[2]);
+         _gpio_write(replybuf[1], replybuf[2]);
 
          len = 3;
          break;
