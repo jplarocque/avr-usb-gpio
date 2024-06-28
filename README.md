@@ -1,4 +1,4 @@
-### GPIO-12 board
+### AVR-GPIO board
 
 This is a gpio over usb board based on [VUSB](https://www.obdev.at/products/vusb/index.html) stack for AVR atmega8 chip. It exposes 18 GPIO lines.
 
@@ -49,7 +49,7 @@ You need to load the kernel driver for this.
 
 `$ cd driver/gpio`  
 `$ make`  
-`$ sudo insmod usb-gpio12.ko`  
+`$ sudo insmod avr-gpio.ko`  
 `$ cd /sys/class/gpio/ `  
            `gpiochip**N**` where **N** is the value allocated by kernel   
 `$ sudo chmod 666 export unexport`  
@@ -62,7 +62,7 @@ You need to load the kernel driver for this.
 
 Before unloading the module, do $ echo **N** > unexport  
 gpio**N** gets deleted by doing so.  
-To unload the module, `$ sudo rmmod usb_gpio12`  
+To unload the module, `$ sudo rmmod avr_gpio`  
 
 ### How to control gpio pins via libusb
 In case, you want to control gpio ports via libusb, follow this guide.

@@ -1,7 +1,8 @@
 /*
- *  GPIO-12 driver
+ *  AVR-GPIO
  *
  *  (C) Amitesh Singh <singh.amitesh@gmail.com>, 2016
+ *  © 2024 Jean-Paul Larocque
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -37,11 +38,11 @@
  void *data, _ _u16 size, int timeout);
  */
 MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("Amitesh Singh <singh.amitesh@gmail.com>");
-MODULE_DESCRIPTION("usb gpio-12 driver.");
+MODULE_AUTHOR("Jean-Paul Larocque <jpl@ftlvisual.com>");
+MODULE_DESCRIPTION("AVR-GPIO USB driver");
 MODULE_VERSION("0.1");
 
-struct my_usb
+struct avr_gpio
 {
    struct usb_device *udev;
    struct gpio_chip chip; //this is our GPIO chip
@@ -54,7 +55,7 @@ static void
 _gpioa_set(struct gpio_chip *chip,
            unsigned offset, int value)
 {
-   struct my_usb *data = container_of(chip, struct my_usb, chip);
+   struct avr_gpio *data = container_of(chip, struct avr_gpio, chip);
    static uint8_t gpio_val;
    int ret;
 
@@ -83,7 +84,7 @@ static int
 _gpioa_get(struct gpio_chip *chip,
            unsigned offset)
 {
-   struct my_usb *data = container_of(chip, struct my_usb, chip);
+   struct avr_gpio *data = container_of(chip, struct avr_gpio, chip);
    gpiopktheader *pkt;
    int ret;
 
@@ -119,7 +120,7 @@ static int
 _direction_output(struct gpio_chip *chip,
                   unsigned offset, int value)
 {
-   struct my_usb *data = container_of(chip, struct my_usb, chip);
+   struct avr_gpio *data = container_of(chip, struct avr_gpio, chip);
    int ret;
 
    spin_lock(&data->lock);
@@ -156,7 +157,7 @@ static int
 _direction_input(struct gpio_chip *chip,
                  unsigned offset)
 {
-   struct my_usb *data = container_of(chip, struct my_usb, chip);
+   struct avr_gpio *data = container_of(chip, struct avr_gpio, chip);
    int ret;
 
    spin_lock(&data->lock);
@@ -188,12 +189,12 @@ _direction_input(struct gpio_chip *chip,
 }
 
 static int
-my_usb_probe(struct usb_interface *interface,
-             const struct usb_device_id *id)
+avr_gpio_probe(struct usb_interface *interface,
+               const struct usb_device_id *id)
 {
    struct usb_device *udev = interface_to_usbdev(interface);
    struct usb_host_interface *iface_desc;
-   struct my_usb *data;
+   struct avr_gpio *data;
    int ret;
 
    static const char
@@ -206,7 +207,7 @@ my_usb_probe(struct usb_interface *interface,
        return -ENODEV;
    }
 
-   data = kzalloc(sizeof(struct my_usb), GFP_KERNEL);
+   data = kzalloc(sizeof(struct avr_gpio), GFP_KERNEL);
    if (data == NULL)
      {
         printk(KERN_ALERT "Failed to alloc data");
@@ -216,7 +217,7 @@ my_usb_probe(struct usb_interface *interface,
    //increase ref count, make sure u call usb_put_dev() in disconnect()
    data->udev = usb_get_dev(udev);
 
-   data->chip.label = "gpio-12";
+   data->chip.label = "avr-gpio";
    data->chip.parent = &data->udev->dev; // optional device providing the GPIOs
    data->chip.owner = THIS_MODULE; // helps prevent removal of modules exporting active GPIOs, so this is required for proper cleanup
    data->chip.base = -1;
@@ -261,7 +262,7 @@ my_usb_probe(struct usb_interface *interface,
    data->chip.ngpio = data->buf[1];
 
    iface_desc = interface->cur_altsetting;
-   printk(KERN_INFO "GPIO-12 board %d probed: (%04X:%04X)",
+   printk(KERN_INFO "AVR-GPIO board %d probed: (%04X:%04X)",
           iface_desc->desc.bInterfaceNumber, id->idVendor, id->idProduct);
    printk(KERN_INFO "bNumEndpoints: %d", iface_desc->desc.bNumEndpoints);
    printk(KERN_INFO "ngpio: %d", data->chip.ngpio);
@@ -276,9 +277,9 @@ my_usb_probe(struct usb_interface *interface,
 }
 
 static void
-my_usb_disconnect(struct usb_interface *interface)
+avr_gpio_disconnect(struct usb_interface *interface)
 {
-   struct my_usb *data;
+   struct avr_gpio *data;
 
    data = usb_get_intfdata(interface);
 
@@ -292,31 +293,31 @@ my_usb_disconnect(struct usb_interface *interface)
    kfree(data);
 }
 
-static struct usb_device_id my_usb_table[] = {
+static struct usb_device_id avr_gpio_table[] = {
        { USB_DEVICE(USB_VENDOR_ID, USB_DEVICE_ID) },
        {},
 };
 
-MODULE_DEVICE_TABLE(usb, my_usb_table);
+MODULE_DEVICE_TABLE(usb, avr_gpio_table);
 
-static struct usb_driver my_usb_driver = {
-     .name = "usb_gpio12",
-     .id_table = my_usb_table,
-     .probe = my_usb_probe,
-     .disconnect = my_usb_disconnect,
+static struct usb_driver avr_gpio_driver = {
+     .name = "avr_gpio",
+     .id_table = avr_gpio_table,
+     .probe = avr_gpio_probe,
+     .disconnect = avr_gpio_disconnect,
 };
 
 static int __init
 _usb_init(void)
 {
-  return usb_register(&my_usb_driver);
+  return usb_register(&avr_gpio_driver);
 }
 
 static void __exit
 _usb_exit(void)
 {
    printk(KERN_INFO "usb driver is unloaded");
-   usb_deregister(&my_usb_driver);
+   usb_deregister(&avr_gpio_driver);
 }
 
 module_init(_usb_init);
