@@ -128,18 +128,11 @@ usbFunctionSetup(uchar data[8])
 int __attribute__((noreturn))
 main(void)
 {
-   uchar i = 0;
-
    wdt_enable(WDTO_2S);
    usbInit();
    usbDeviceDisconnect();
-
-   while(--i)
-     {
-        wdt_reset();
-        _delay_ms(1);
-     }
-
+   wdt_reset();
+   _delay_ms(250);
    usbDeviceConnect();
    sei();
 
