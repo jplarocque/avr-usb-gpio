@@ -39,9 +39,9 @@ MODULE_VERSION("0.1");
 struct avr_gpio {
     struct usb_device *udev;
     struct gpio_chip chip; //this is our GPIO chip
-    u8 buf[1];
     u32 timeout;
     spinlock_t lock;
+    u8 buf[1];
 };
 
 static int
@@ -92,6 +92,7 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
     static const char
         vendor_name[USB_CFG_VENDOR_NAME_LEN + 1] = {USB_CFG_VENDOR_NAME, '\0'},
         device_name[USB_CFG_DEVICE_NAME_LEN + 1] = {USB_CFG_DEVICE_NAME, '\0'};
+    // FIXME: isn't this printing superfluous?  Don't other USB bits do this too?
     printk(KERN_INFO "manufacturer: %s", udev->manufacturer);
     printk(KERN_INFO "product: %s", udev->product);
     if (! (strcmp(udev->manufacturer, vendor_name) == 0 &&
@@ -136,7 +137,8 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
     if (ret != 1) {
         dev_err(&data->udev->dev, "GET_INFO failed (ret %d)\n",
                 ret);
-        return -EREMOTEIO;
+        ret = -EREMOTEIO;
+        goto err;
     }
 
     data->chip.ngpio = data->buf[0];
@@ -149,17 +151,22 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
     
     if (gpiochip_add(&data->chip) < 0) {
         printk(KERN_ALERT "Failed to add gpio chip");
-        return -ENODEV;
+        ret = -ENODEV;
+        goto err;
     }
     
     return 0;
+
+ err:
+    usb_put_dev(data->udev);
+    kfree(data);
+    return ret;
 }
 
 static void
 usb_disconnect(struct usb_interface *interface) {
     struct avr_gpio *data = usb_get_intfdata(interface);
     gpiochip_remove(&data->chip);
-    usb_set_intfdata(interface, NULL);
     usb_put_dev(data->udev);
     kfree(data);
 }
