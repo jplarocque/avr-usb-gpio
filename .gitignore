@@ -9,5 +9,3 @@
 *.elf
 *.var
 a.out
-firmware/usbtest/usbtest
-on_off
