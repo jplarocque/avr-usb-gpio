@@ -202,7 +202,7 @@ direction_output(struct gpio_chip *chip, unsigned int offset, int value) {
     ret = usb_control_msg(data->udev, usb_sndctrlpipe(data->udev, 0),
                           GPIO_OUTPUT,
                           USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_OUT,
-                          0, offset,
+                          !!value, offset,
                           NULL, 0,
                           data->timeout);
     spin_unlock(&data->lock);

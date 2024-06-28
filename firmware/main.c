@@ -89,18 +89,16 @@ usbFunctionSetup(uchar data[8]) {
         return 0;
        
     case GPIO_OUTPUT:
-        *DDRx(base) |= mask;
+    case GPIO_WRITE:
+        if (rq->wValue.bytes[0]) *PORTx(base) |= mask;
+        else *PORTx(base) &= ~mask;
+        if (cmd == GPIO_OUTPUT) *DDRx(base) |= mask;
         return 0;
        
     case GPIO_READ:
         replybuf[0] = *PINx(base) & mask;
         return 1;
 
-    case GPIO_WRITE:
-        if (rq->wValue.bytes[0]) *PORTx(base) |= mask;
-        else *PORTx(base) &= ~mask;
-        return 0;
-       
     default:
         return 0;
     }
