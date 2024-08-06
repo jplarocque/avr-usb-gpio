@@ -6,6 +6,7 @@
 *.tmp*
 *.order
 *.hex
+*.bin
 *.elf
 a.out
 firmware/usbtest/usbtest

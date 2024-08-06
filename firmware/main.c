@@ -38,6 +38,23 @@
 
 #define ARRAYLEN(array) (sizeof ((array)) / sizeof ((array)[0]))
 
+FUSES = {
+    .low = (0xFF
+            // BOD enabled, 4.0 V:
+            & FUSE_BODLEVEL & FUSE_BODEN
+            // For crystal oscillator w/ BOD enabled:
+            & FUSE_SUT1 /*& FUSE_SUT0*/
+            // Crystal oscillator, 1+ MHz:
+            /*& FUSE_CKSEL3 & FUSE_CKSEL2 & FUSE_CKSEL1 & FUSE_CKSEL0*/
+            ),
+    .high = (0xFF
+             // Allow serial programming:
+             & FUSE_SPIEN
+             // Use full output swing for crystal oscillator:
+             & FUSE_CKOPT
+             ),
+};
+
 static uint8_t replybuf[5];
 
 static inline volatile uint8_t *

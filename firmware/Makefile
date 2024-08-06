@@ -9,40 +9,12 @@
 
 DEVICE=atmega8
 F_CPU = 16000000 # in Hz
-FUSE_L = 0x1F
-FUSE_H = 0xC9
 AVRDUDE = avrdude -c usbasp -p $(DEVICE)
 
 CFLAGS  = -Iv-usb/usbdrv -I. -DDEBUG_LEVEL=0
 OBJECTS = v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o v-usb/usbdrv/oddebug.o main.o
 
 COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
-
-##############################################################################
-# Fuse values for particular devices
-##############################################################################
-# If your device is not listed here, go to
-# http://palmavr.sourceforge.net/cgi-bin/fc.cgi
-# and choose options for external crystal clock and no clock divider
-#
-################################## ATMega8 ##################################
-# ATMega8 FUSE_L (Fuse low byte):
-# 0x1F = 0 0 0 1   1 1 1 1
-#        ^ ^ \ /   \--+--/
-#        | |  |       +------- CKSEL3..0 (crystal osc, 1+ MHz)
-#        | |  +--------------- SUT1..0 (crystal osc, BOD enabled)
-#        | +------------------ BODEN (BrownOut Detector enabled)
-#        +-------------------- BODLEVEL (4.0 V)
-# ATMega8 FUSE_H (Fuse high byte):
-# 0xC9 = 1 1 0 0   1 0 0 1
-#        ^ ^ ^ ^   ^ \+/ ^
-#        | | | |   |  |  +---- BOOTRST (boot reset vector at 0x0000)     
-#        | | | |   |  +------- BOOTSZ1..0 (1024-word boot size)
-#        | | | |   + --------- EESAVE (don't preserve EEPROM over chip erase)
-#        | | | +-------------- CKOPT (full output swing crystal osc)
-#        | | +---------------- SPIEN (allow serial programming)
-#        | +------------------ WDTON (WDT not always on)
-#        +-------------------- RSTDISBL (reset pin is enabled)
 
 # symbolic targets:
 help:
@@ -55,13 +27,21 @@ help:
 
 hex: main.hex
 
-program: flash fuse
+program: fuse flash
 
 # rule for programming fuse bits:
-fuse:
-	@[ "$(FUSE_H)" != "" -a "$(FUSE_L)" != "" ] || \
-		{ echo "*** Edit Makefile and choose values for FUSE_L and FUSE_H!"; exit 1; }
-	$(AVRDUDE) -U hfuse:w:$(FUSE_H):m -U lfuse:w:$(FUSE_L):m
+fuse: main.fuse.bin
+# Slow rate in case target has one of the default slow clock configurations.
+	$(AVRDUDE) -B200kHz $(shell \
+	    i=0; \
+	    for reg in lfuse hfuse efuse; do \
+	        hex=$$(od -An -tx1 -j$$i -N1 $< | tr -d ' '); \
+	        i=$$((i + 1)); \
+	        [ "$$hex" ] || break; \
+	        echo "-U$$reg:w:0x$$hex:m"; \
+	    done)
+main.fuse.bin: main.elf Makefile
+	avr-objcopy -j .fuse -O binary $< $@
 
 # rule for uploading firmware:
 flash: main.hex
@@ -69,7 +49,7 @@ flash: main.hex
 
 # rule for deleting dependent files (those which can be built by Make):
 clean:
-	rm -f main.hex main.lst main.obj main.cof main.list main.map main.eep.hex main.elf *.o v-usb/usbdrv/*.o main.s v-usb/usbdrv/oddebug.s v-usb/usbdrv/usbdrv.s
+	rm -f main.hex main.lst main.obj main.cof main.list main.map main.eep.hex main.elf *.bin *.o v-usb/usbdrv/*.o main.s v-usb/usbdrv/oddebug.s v-usb/usbdrv/usbdrv.s
 
 # Generic rule for compiling C files:
 .c.o:
