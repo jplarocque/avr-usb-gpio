@@ -8,10 +8,10 @@
 # This Revision: $Id: Makefile 692 2008-11-07 15:07:40Z cs $
 
 DEVICE=atmega8
-F_CPU   = 16000000    # in Hz
-FUSE_L  = 0xE1
-FUSE_H  = 0xDD
-AVRDUDE = avrdude -c usbasp  -p $(DEVICE)
+F_CPU = 16000000 # in Hz
+FUSE_L = 0x1F
+FUSE_H = 0xC9
+AVRDUDE = avrdude -c usbasp -p $(DEVICE)
 
 CFLAGS  = -Iv-usb/usbdrv -I. -DDEBUG_LEVEL=0
 OBJECTS = v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o v-usb/usbdrv/oddebug.o main.o
@@ -27,19 +27,19 @@ COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
 #
 ################################## ATMega8 ##################################
 # ATMega8 FUSE_L (Fuse low byte):
-# 0xe1 = 1 1 1 0   0 0 0 1
+# 0x1F = 0 0 0 1   1 1 1 1
 #        ^ ^ \ /   \--+--/
-#        | |  |       +------- CKSEL3..0 (RC osc, 1 MHz)
-#        | |  +--------------- SUT1..0 (RC osc, slowly-rising power)
+#        | |  |       +------- CKSEL3..0 (crystal osc, 1+ MHz)
+#        | |  +--------------- SUT1..0 (crystal osc, BOD enabled)
 #        | +------------------ BODEN (BrownOut Detector enabled)
-#        +-------------------- BODLEVEL (2.7V)
+#        +-------------------- BODLEVEL (4.0 V)
 # ATMega8 FUSE_H (Fuse high byte):
-# 0xdd = 1 1 0 1   1 1 0 1
+# 0xC9 = 1 1 0 0   1 0 0 1
 #        ^ ^ ^ ^   ^ \+/ ^
 #        | | | |   |  |  +---- BOOTRST (boot reset vector at 0x0000)     
-#        | | | |   |  +------- BOOTSZ1..0 (256-word boot size)
+#        | | | |   |  +------- BOOTSZ1..0 (1024-word boot size)
 #        | | | |   + --------- EESAVE (don't preserve EEPROM over chip erase)
-#        | | | +-------------- CKOPT (RC osc)
+#        | | | +-------------- CKOPT (full output swing crystal osc)
 #        | | +---------------- SPIEN (allow serial programming)
 #        | +------------------ WDTON (WDT not always on)
 #        +-------------------- RSTDISBL (reset pin is enabled)
