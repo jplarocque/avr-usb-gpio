@@ -5,9 +5,9 @@
 *.cmd
 *.tmp*
 *.order
-*.hex
 *.bin
 *.elf
+*.var
 a.out
 firmware/usbtest/usbtest
 on_off

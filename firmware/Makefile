@@ -1,38 +1,22 @@
-# Name: Makefile
-# Project: hid-mouse example
-# Author: Christian Starkjohann
-# Creation Date: 2008-04-07
-# Tabsize: 4
-# Copyright: (c) 2008 by OBJECTIVE DEVELOPMENT Software GmbH
-# License: GNU GPL v2 (see License.txt), GNU GPL v3 or proprietary (CommercialLicense.txt)
-# This Revision: $Id: Makefile 692 2008-11-07 15:07:40Z cs $
+DEVICE := atmega8
+F_CPU := 16000000 # in Hz
 
-DEVICE=atmega8
-F_CPU = 16000000 # in Hz
-AVRDUDE = avrdude -c usbasp -p $(DEVICE)
+CFLAGS := -Wall -Os
+CPPFLAGS := -mmcu=$(DEVICE) -Iv-usb/usbdrv -I. -DDEBUG_LEVEL=0 -DF_CPU=$(F_CPU)
+AVRDUDE_FLAGS := -c usbasp
 
-CFLAGS  = -Iv-usb/usbdrv -I. -DDEBUG_LEVEL=0
-OBJECTS = v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o v-usb/usbdrv/oddebug.o main.o
+CC := avr-gcc
+OBJCOPY := avr-objcopy
+AVRDUDE := avrdude
 
-COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
-
-# symbolic targets:
-help:
-	@echo "This Makefile has no default rule. Use one of the following:"
-	@echo "make hex ....... to build main.hex"
-	@echo "make program ... to flash fuses and firmware"
-	@echo "make fuse ...... to flash the fuses"
-	@echo "make flash ..... to flash the firmware (use this on metaboard)"
-	@echo "make clean ..... to delete objects and hex file"
-
-hex: main.hex
+all: main.bin main.fuse.bin
+	@avr-size main.elf
 
 program: fuse flash
 
-# rule for programming fuse bits:
 fuse: main.fuse.bin
 # Slow rate in case target has one of the default slow clock configurations.
-	$(AVRDUDE) -B200kHz $(shell \
+	$(AVRDUDE) $(AVRDUDE_FLAGS) -p $(DEVICE) -B200kHz $(shell \
 	    i=0; \
 	    for reg in lfuse hfuse efuse; do \
 	        hex=$$(od -An -tx1 -j$$i -N1 $< | tr -d ' '); \
@@ -40,47 +24,39 @@ fuse: main.fuse.bin
 	        [ "$$hex" ] || break; \
 	        echo "-U$$reg:w:0x$$hex:m"; \
 	    done)
-main.fuse.bin: main.elf Makefile
-	avr-objcopy -j .fuse -O binary $< $@
 
-# rule for uploading firmware:
-flash: main.hex
-	$(AVRDUDE) -U flash:w:main.hex:i
+flash: main.bin
+	$(AVRDUDE) $(AVRDUDE_FLAGS) -p $(DEVICE) -U flash:w:$<:r
 
-# rule for deleting dependent files (those which can be built by Make):
 clean:
-	rm -f main.hex main.lst main.obj main.cof main.list main.map main.eep.hex main.elf *.bin *.o v-usb/usbdrv/*.o main.s v-usb/usbdrv/oddebug.s v-usb/usbdrv/usbdrv.s
+	rm -f *.o *.elf *.bin *.var v-usb/usbdrv/*.o
 
-# Generic rule for compiling C files:
-.c.o:
-	$(COMPILE) -c $< -o $@
+.PHONY: all program fuse flash clean phony
 
-# Generic rule for assembling Assembler source files:
-.S.o:
-	$(COMPILE) -x assembler-with-cpp -c $< -o $@
-# "-x assembler-with-cpp" should not be necessary since this is the default
-# file type for the .S (with capital S) extension. However, upper case
-# characters are not always preserved on Windows. To ensure WinAVR
-# compatibility define the file type manually.
+define DEPENDABLE_VAR
+$1.var: phony
+	@printf '%s\n' '$($1)' > $1.var.new
+	@cmp -s $1.var $1.var.new && rm $1.var.new || mv $1.var.new $1.var
+endef
+$(eval $(call DEPENDABLE_VAR,CFLAGS))
+$(eval $(call DEPENDABLE_VAR,CPPFLAGS))
 
-# Generic rule for compiling C to assembler, used for debugging only.
-.c.s:
-	$(COMPILE) -S $< -o $@
+main.bin: main.elf
+	$(OBJCOPY) -j .text -j .data -O binary $< $@
+main.fuse.bin: main.elf
+	$(OBJCOPY) -j .fuse -O binary $< $@
 
-# file targets:
+main.elf: main.o $(addprefix v-usb/usbdrv/,usbdrv.o usbdrvasm.o oddebug.o)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^
 
-main.elf: $(OBJECTS)
-	$(COMPILE) -o main.elf $(OBJECTS)
+%.o: %.c CFLAGS.var CPPFLAGS.var
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
-main.hex: main.elf
-	rm -f main.hex main.eep.hex
-	avr-objcopy -j .text -j .data -O ihex main.elf main.hex
-	avr-size main.hex
+%.o: %.S CFLAGS.var CPPFLAGS.var
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
-# debugging targets:
-
-disasm:	main.elf
-	avr-objdump -d main.elf
-
-cpp:
-	$(COMPILE) -E main.c
+# Cancel implicit rules, which can mask failures in the DEPENDABLE_VAR
+# dependency logic.
+%.o: %.c
+%.o: %.S
+%.o: %.s
