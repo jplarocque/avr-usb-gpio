@@ -62,7 +62,8 @@ _gpioa_set(struct gpio_chip *chip,
    spin_unlock(&data->lock);
 
    if (ret != 0) {
-     dev_err(chip->parent, "usb error setting pin value\n");
+       dev_err(chip->parent, "GPIO_WRITE %d = %d failed (ret %d)\n",
+               offset, !!value, ret);
    }
 }
 
@@ -72,8 +73,6 @@ _gpioa_get(struct gpio_chip *chip,
 {
    struct avr_gpio *data = container_of(chip, struct avr_gpio, chip);
    int ret;
-
-   printk(KERN_INFO "GPIO GET INFO: %d", offset);
 
    spin_lock(&data->lock);
    ret = usb_control_msg(data->udev, usb_rcvctrlpipe(data->udev, 0),
@@ -85,8 +84,9 @@ _gpioa_get(struct gpio_chip *chip,
    spin_unlock(&data->lock);
 
    if (ret != 1) {
-        printk(KERN_ALERT "ret = %d Failed to get correct reply", ret);
-        return -EREMOTEIO;
+       dev_err(chip->parent, "GPIO_READ %d failed (ret %d)\n",
+               offset, ret);
+       return -EREMOTEIO;
    }
    
    return !!data->buf[0];
@@ -109,8 +109,9 @@ _direction_output(struct gpio_chip *chip,
    spin_unlock(&data->lock);
 
    if (ret != 0) {
-        printk(KERN_ALERT "ret = %d Failed to get correct reply", ret);
-        return -EREMOTEIO;
+       dev_err(chip->parent, "GPIO_OUTPUT %d failed (ret %d)\n",
+               offset, ret);
+       return -EREMOTEIO;
    }
    
    return 0;
@@ -133,8 +134,9 @@ _direction_input(struct gpio_chip *chip,
    spin_unlock(&data->lock);
 
    if (ret != 0) {
-        printk(KERN_ALERT "ret= %d Failed to get correct reply", ret);
-        return -EREMOTEIO;
+       dev_err(chip->parent, "GPIO_INPUT %d failed (ret %d)\n",
+               offset, ret);
+       return -EREMOTEIO;
    }
    
    return 0;
@@ -197,8 +199,9 @@ avr_gpio_probe(struct usb_interface *interface,
    spin_unlock(&data->lock);
 
    if (ret != 1) {
-        printk(KERN_ALERT "ret = %d, func= %s Failed to get correct reply", ret, __func__);
-        return -EREMOTEIO;
+       dev_err(&data->udev->dev, "GET_INFO failed (ret %d)\n",
+               ret);
+       return -EREMOTEIO;
    }
 
    data->chip.ngpio = data->buf[0];
