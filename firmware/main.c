@@ -28,32 +28,25 @@
 #include <avr/io.h>
 #include <avr/wdt.h>
 #include <avr/interrupt.h>
+#include <avr/pgmspace.h>
 #include <util/delay.h>
 
-#include <avr/pgmspace.h>
+// Support macros for usbconfig.h, included by usbdrv.h:
+#define DEFFUSES(...)                           \
+    FUSES = {__VA_ARGS__};
+#define DEFGPIOTAB(...)                                         \
+    static const PROGMEM uint8_t gpiotab[] = {__VA_ARGS__};
+#define TABENT(port, bit) (((port) << 3) | (bit))
+#define PORT_A 0
+#define PORT_B 1
+#define PORT_C 2
+#define PORT_D 3
 #include "usbdrv.h"
 
 #define AVR_USB_FIRMWARE
 #include "common.h"
 
 #define ARRAYLEN(array) (sizeof ((array)) / sizeof ((array)[0]))
-
-FUSES = {
-    .low = (0xFF
-            // BOD enabled, 4.0 V:
-            & FUSE_BODLEVEL & FUSE_BODEN
-            // For crystal oscillator w/ BOD enabled:
-            & FUSE_SUT1 /*& FUSE_SUT0*/
-            // Crystal oscillator, 1+ MHz:
-            /*& FUSE_CKSEL3 & FUSE_CKSEL2 & FUSE_CKSEL1 & FUSE_CKSEL0*/
-            ),
-    .high = (0xFF
-             // Allow serial programming:
-             & FUSE_SPIEN
-             // Use full output swing for crystal oscillator:
-             & FUSE_CKOPT
-             ),
-};
 
 static uint8_t replybuf[5];
 
@@ -71,41 +64,6 @@ static inline volatile uint8_t *
 PINx(volatile uint8_t *base) {
     return base - 2;
 }
-
-#define TABENT(port, bit) (((port) << 3) | (bit))
-#define PORT_A 0
-#define PORT_B 1
-#define PORT_C 2
-#define PORT_D 3
-
-static const PROGMEM uint8_t gpiotab[] = {
-    /* List the defined entries contiguously to easily find the index of an
-       entry by its line number: */
-    TABENT(PORT_B, 0),
-    TABENT(PORT_B, 1),
-    TABENT(PORT_B, 2),
-    TABENT(PORT_B, 3),
-    TABENT(PORT_B, 4),
-    TABENT(PORT_B, 5),
-    TABENT(PORT_C, 0),
-    TABENT(PORT_C, 1),
-    TABENT(PORT_C, 2),
-    TABENT(PORT_C, 3),
-    TABENT(PORT_C, 4),
-    TABENT(PORT_C, 5),
-    TABENT(PORT_D, 0),
-    TABENT(PORT_D, 1),
-    TABENT(PORT_D, 3),
-    TABENT(PORT_D, 5),
-    TABENT(PORT_D, 6),
-    TABENT(PORT_D, 7),
-    /* Undefined entries due to pin conflicts or other reasons: */
-    //TABENT(PORT_B, 6), // XTAL1
-    //TABENT(PORT_B, 7), // XTAL2
-    //TABENT(PORT_C, 6), // /Reset
-    //TABENT(PORT_D, 2), // INT0, D+
-    //TABENT(PORT_D, 4), // D-
-};
 
 static bool
 gpio_base_and_mask(volatile uint8_t **base, uint8_t *mask, uint8_t no) {

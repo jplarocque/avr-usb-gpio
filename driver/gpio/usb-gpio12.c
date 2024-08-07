@@ -28,7 +28,7 @@
 #include <linux/spinlock.h>
 
 #include "../../firmware/common.h"
-#include "../../firmware/usbconfig.h"
+#include "../../firmware/usbidconfig.h"
 
 /*
  * usb_control_msg(struct usb_device *dev, unsigned int pipe,

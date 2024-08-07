@@ -49,10 +49,10 @@ main.fuse.bin: main.elf
 main.elf: main.o $(addprefix v-usb/usbdrv/,usbdrv.o usbdrvasm.o oddebug.o)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^
 
-%.o: %.c CFLAGS.var CPPFLAGS.var
+%.o: %.c CFLAGS.var CPPFLAGS.var usbconfig.h usbidconfig.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
-%.o: %.S CFLAGS.var CPPFLAGS.var
+%.o: %.S CFLAGS.var CPPFLAGS.var usbconfig.h usbidconfig.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 # Cancel implicit rules, which can mask failures in the DEPENDABLE_VAR
