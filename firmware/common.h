@@ -21,30 +21,12 @@
 #ifndef COMMON_H_
 #define COMMON_H_
 
-#ifdef AVR_USB_FIRMWARE
-#include <stdint.h>
-#endif
-
-typedef struct __attribute__((__packed__)) _gpio_info
-{
-   uint8_t no;
-   uint8_t data;
-} gpio_info;
-
-typedef struct __attribute__((__packed__)) _gpiopktheader
-{
-   uint8_t command;
-   gpio_info gpio;
-} gpiopktheader;
-
-typedef enum _command
-{
-   BOARD_INIT, // This does the init of board
+enum proto_cmd {
+   GET_INFO, // Get board information
    GPIO_INPUT, // Set GPIO as input
    GPIO_OUTPUT, // Set GPIO as output
-   GPIO_READ,   // Read GPIO
+   GPIO_READ, // Read GPIO
    GPIO_WRITE, // Write to GPIO
-} command;
-
+};
 
 #endif /* COMMON_H_ */

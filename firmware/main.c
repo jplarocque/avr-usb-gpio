@@ -44,12 +44,9 @@
 #define PORT_D 3
 #include "usbdrv.h"
 
-#define AVR_USB_FIRMWARE
 #include "common.h"
 
 #define ARRAYLEN(array) (sizeof ((array)) / sizeof ((array)[0]))
-
-static uint8_t replybuf[5];
 
 static inline volatile uint8_t *
 PORTx(volatile uint8_t *base) {
@@ -79,35 +76,6 @@ gpio_base_and_mask(volatile uint8_t **base, uint8_t *mask, uint8_t no) {
     }
 }
 
-static void
-_gpio_init(uint8_t no, uint8_t input)
-{
-    volatile uint8_t *base;
-    uint8_t mask;
-    if (! gpio_base_and_mask(&base, &mask, no)) return;
-    if (input) *DDRx(base) &= ~mask;
-    else *DDRx(base) |= mask;
-}
-
-static bool
-_gpio_read(uint8_t no)
-{
-    volatile uint8_t *base;
-    uint8_t mask;
-    if (! gpio_base_and_mask(&base, &mask, no)) return;
-    return *PINx(base) & mask;
-}
-
-static void
-_gpio_write(uint8_t no, bool value)
-{
-    volatile uint8_t *base;
-    uint8_t mask;
-    if (! gpio_base_and_mask(&base, &mask, no)) return;
-    if (value) *PORTx(base) |= mask;
-    else *PORTx(base) &= ~mask;
-}
-
 /*
 #define MOSI PB3
 #define MISO PB4
@@ -118,57 +86,43 @@ _gpio_write(uint8_t no, bool value)
 usbMsgLen_t
 usbFunctionSetup(uchar data[8])
 {
-   usbRequest_t *rq = (void *)data;
-   uint8_t len = 0;
+   usbRequest_t *rq = (void *) data;
+   enum proto_cmd cmd = rq->bRequest;
+   static uint8_t replybuf[1];
+   usbMsgPtr = replybuf;
+   
+   if (cmd == GET_INFO) {
+       replybuf[0] = ARRAYLEN(gpiotab);
+       return 1;
+   }
+   
+   // All other requests encode a GPIO number in wIndex.
+   uint8_t gpio_num = rq->wIndex.bytes[0];
+   volatile uint8_t *base;
+   uint8_t mask;
+   if (! gpio_base_and_mask(&base, &mask, gpio_num)) return 0;
+   
+   switch(cmd) {
+   case GPIO_INPUT:
+       *DDRx(base) &= ~mask;
+       return 0;
+       
+   case GPIO_OUTPUT:
+       *DDRx(base) |= mask;
+       return 0;
+       
+   case GPIO_READ:
+       replybuf[0] = *PINx(base) & mask;
+       return 1;
 
-   replybuf[0] = rq->bRequest;
-
-   switch(rq->bRequest)
-     {
-      case BOARD_INIT:
-
-         //do board init stuffs,
-         len = 2;
-         replybuf[1] = ARRAYLEN(gpiotab);
-         //blink leds etcs ? we could use some port for blinking? not sure?
-         break;
-
-      case GPIO_INPUT:
-         replybuf[1] = rq->wValue.bytes[0]; // gpio no
-         _gpio_init(replybuf[1], 1);
-
-         len = 2;
-         break;
-
-      case GPIO_OUTPUT:
-         replybuf[1] = rq->wValue.bytes[0]; //gpio no
-         _gpio_init(replybuf[1], 0);
-
-         len = 2;
-         break;
-
-      case GPIO_READ:
-         replybuf[1] = rq->wValue.bytes[0]; // gpio no
-         replybuf[2] = _gpio_read(replybuf[1]); //this populates gpio value
-
-         len = 3;
-         break;
-
-      case GPIO_WRITE:
-         replybuf[1] = rq->wValue.bytes[0]; //gpio no.
-         replybuf[2] = rq->wValue.bytes[1]; // gpio value
-         _gpio_write(replybuf[1], replybuf[2]);
-
-         len = 3;
-         break;
-
-      default:
-         break;
-     }
-
-   usbMsgPtr = (unsigned char *) replybuf;
-
-   return len; // should not get here
+   case GPIO_WRITE:
+       if (rq->wValue.bytes[0]) *PORTx(base) |= mask;
+       else *PORTx(base) &= ~mask;
+       return 0;
+       
+   default:
+       return 0;
+   }
 }
 
 int __attribute__((noreturn))
