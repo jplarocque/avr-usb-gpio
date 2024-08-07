@@ -18,13 +18,6 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/*
- *  D2(D+) and D4(D-) are used for vusb  and PB6 and PB6 are used for 16MHz crystal
- *  then 12 GPIOs are only left for general purpose.
- *  PD0  - PD7 (excluding PD2/D+ and PD4/D - ) = 6
- *	PB0  - PB5 (excluding PB6 and PB7)  = 6
- */
-
 #include <stdbool.h>
 #include <avr/io.h>
 #include <avr/wdt.h>
@@ -43,24 +36,74 @@
 #define PORT_C 2
 #define PORT_D 3
 #include "usbdrv.h"
-
 #include "common.h"
 
 #define ARRAYLEN(array) (sizeof ((array)) / sizeof ((array)[0]))
 
+static bool
+gpio_base_and_mask(volatile uint8_t **base, uint8_t *mask, uint8_t gpio_num);
 static inline volatile uint8_t *
-PORTx(volatile uint8_t *base) {
-    return base - 0;
+PORTx(volatile uint8_t *base);
+static inline volatile uint8_t *
+DDRx(volatile uint8_t *base);
+static inline volatile uint8_t *
+PINx(volatile uint8_t *base);
+
+int __attribute__((noreturn))
+main(void) {
+    wdt_enable(WDTO_2S);
+    usbInit();
+    usbDeviceDisconnect();
+    wdt_reset();
+    _delay_ms(250);
+    usbDeviceConnect();
+    sei();
+
+    while (true) {
+        wdt_reset();
+        usbPoll();
+    }
 }
 
-static inline volatile uint8_t *
-DDRx(volatile uint8_t *base) {
-    return base - 1;
-}
+usbMsgLen_t
+usbFunctionSetup(uchar data[8]) {
+    usbRequest_t *rq = (void *) data;
+    enum proto_cmd cmd = rq->bRequest;
+    static uint8_t replybuf[1];
+    usbMsgPtr = replybuf;
+   
+    if (cmd == GET_INFO) {
+        replybuf[0] = ARRAYLEN(gpiotab);
+        return 1;
+    }
+   
+    // All other requests encode a GPIO number in wIndex.
+    uint8_t gpio_num = rq->wIndex.bytes[0];
+    volatile uint8_t *base;
+    uint8_t mask;
+    if (! gpio_base_and_mask(&base, &mask, gpio_num)) return 0;
+   
+    switch(cmd) {
+    case GPIO_INPUT:
+        *DDRx(base) &= ~mask;
+        return 0;
+       
+    case GPIO_OUTPUT:
+        *DDRx(base) |= mask;
+        return 0;
+       
+    case GPIO_READ:
+        replybuf[0] = *PINx(base) & mask;
+        return 1;
 
-static inline volatile uint8_t *
-PINx(volatile uint8_t *base) {
-    return base - 2;
+    case GPIO_WRITE:
+        if (rq->wValue.bytes[0]) *PORTx(base) |= mask;
+        else *PORTx(base) &= ~mask;
+        return 0;
+       
+    default:
+        return 0;
+    }
 }
 
 static bool
@@ -76,69 +119,17 @@ gpio_base_and_mask(volatile uint8_t **base, uint8_t *mask, uint8_t no) {
     }
 }
 
-/*
-#define MOSI PB3
-#define MISO PB4
-#define SCK PB5
-#define SS PB3
- */
-
-usbMsgLen_t
-usbFunctionSetup(uchar data[8])
-{
-   usbRequest_t *rq = (void *) data;
-   enum proto_cmd cmd = rq->bRequest;
-   static uint8_t replybuf[1];
-   usbMsgPtr = replybuf;
-   
-   if (cmd == GET_INFO) {
-       replybuf[0] = ARRAYLEN(gpiotab);
-       return 1;
-   }
-   
-   // All other requests encode a GPIO number in wIndex.
-   uint8_t gpio_num = rq->wIndex.bytes[0];
-   volatile uint8_t *base;
-   uint8_t mask;
-   if (! gpio_base_and_mask(&base, &mask, gpio_num)) return 0;
-   
-   switch(cmd) {
-   case GPIO_INPUT:
-       *DDRx(base) &= ~mask;
-       return 0;
-       
-   case GPIO_OUTPUT:
-       *DDRx(base) |= mask;
-       return 0;
-       
-   case GPIO_READ:
-       replybuf[0] = *PINx(base) & mask;
-       return 1;
-
-   case GPIO_WRITE:
-       if (rq->wValue.bytes[0]) *PORTx(base) |= mask;
-       else *PORTx(base) &= ~mask;
-       return 0;
-       
-   default:
-       return 0;
-   }
+static inline volatile uint8_t *
+PORTx(volatile uint8_t *base) {
+    return base - 0;
 }
 
-int __attribute__((noreturn))
-main(void)
-{
-   wdt_enable(WDTO_2S);
-   usbInit();
-   usbDeviceDisconnect();
-   wdt_reset();
-   _delay_ms(250);
-   usbDeviceConnect();
-   sei();
+static inline volatile uint8_t *
+DDRx(volatile uint8_t *base) {
+    return base - 1;
+}
 
-   while(1)
-     {
-        wdt_reset();
-        usbPoll();
-     }
+static inline volatile uint8_t *
+PINx(volatile uint8_t *base) {
+    return base - 2;
 }
