@@ -22,11 +22,15 @@
 #define COMMON_H_
 
 enum proto_cmd {
-   GET_INFO, // Get board information
-   GPIO_INPUT, // Set GPIO as input
-   GPIO_OUTPUT, // Set GPIO as output
-   GPIO_READ, // Read GPIO
-   GPIO_WRITE, // Write to GPIO
+    // IN: get array of valid I/O line masks for each port
+    MSG_VALID_MASK,
+    
+    // IN: get [PORT[index], DDR[index]]
+    // OUT: set PORT[index] = value[0], DDR[index] = value[1] (little-endian)
+    MSG_PORT_DDR,
+    
+    // IN: get [PIN[index]]
+    MSG_PIN,
 };
 
 #endif /* COMMON_H_ */

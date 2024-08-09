@@ -341,18 +341,98 @@ macro myAssemblerMacro
 
 /* --------------------- Device-Specific Configuration --------------------- */
 
-// Hacks to allow inclusion by v-usb source code files:
-#ifndef DEFFUSES
+#ifdef FROM_MAIN_FIRMWARE
+/* When this header file is ultimately included from main.c, define a data
+   structure (used only by main.c), and define macros which (unfortunately,
+   since this is a /header/ file) define objects.
+
+   This is gross, but it allows us to keep ALL MCU-specific configuration
+   together.  Since MCU-specific configuration includes macros consumed by
+   V-USB, that means defining it here, in this header file. */
+struct gpio_port {
+    volatile uint8_t *PORTx, *DDRx, *PINx;
+    /* A bitmap/mask of which lines of this port are available for use by the
+       USB host.  If this is a placeholder port, then specify 0 (all lines
+       unavailable). */
+    uint8_t valid_mask;
+    uint8_t _pad;
+};
+
+#  define DEFFUSES(...)                         \
+    FUSES = {__VA_ARGS__};
+#  define DEFPORTS(...)                                         \
+    static const struct gpio_port io_ports[] = {__VA_ARGS__};
+#else
+// No-op macros for V-USB source files:
 #  define DEFFUSES(...)
-#endif
-#ifndef DEFGPIOTAB
-#  define DEFGPIOTAB(...)
+#  define DEFPORTS(...)
 #endif
 
-/* Warning: Do not use a semicolon after DEFFUSES() or DEFGPIOTAB().  When the
-   regular macros are defined, they expand to include a terminating semicolon.
-   When the no-op macros are defined, an external trailing semicolon could be
-   included in non-C source code. */
+/* The DEFFUSES() macro builds on the avr-libc FUSES macro to define which
+   fuses to program (see <avr/fuse.h> documentation).  You can use C
+   preprocessor conditionals and C constant expressions logic/arithmetic in
+   order to tune the fuses as needed for build variations, etc.
+   
+   The DEFPORTS() macro defines an array of `struct gpio_port`.  Each struct
+   represents a possible I/O port and expresses information about it.  The
+   array as a whole represents all I/O port names starting from "PA", and
+   continuing in sequence up to the last (highest) named I/O port of the target
+   MCU.  If the MCU doesn't have a "PA" I/O port (or any other port name
+   interspersed in that sequence), an array entry still needs to be defined for
+   that port name with a placeholder struct, so that the USB host-side device
+   driver may correctly infer the port name of following structs.
+
+   EXCEPTION: Atmel/Microchip don't define a "PI" I/O port for any AVR MCU
+   (determined by checking avr-libc <avr/io*.h> headers), maybe to avoid
+   confusion with the digit "1".  The driver DOES take this into account, so if
+   you have ports numbered higher than PI, do NOT represent a placeholder port
+   for "PI" in the DEFPORTS() initializers.
+   
+   Specify a comma-separated list of `struct gpio_port` initializers in
+   DEFPORTS().  To define a real port, use pointers to its registers, and a
+   mask of allowed/valid lines on the port.  For example:
+   
+       {&PORTC, &DDRC, &PINC, 0b00111111}
+
+   To define a placeholder entry, write an initializer which specifies a
+   .valid_mask = 0, and use pointers to the correct registers of any other
+   single valid I/O port (even if that port is represented as a real port in
+   another array index).  For example:
+   
+       {&PORTB, &DDRB, &PINB, 0},
+
+   WARNING: Do not use a semicolon after DEFFUSES() or DEFPORTS().  The regular
+   macros for main.c expand to include a terminating semicolon, so adding your
+   own is not necessary.  In the case of expansion of the no-op macros from
+   within V-USB code, an external trailing semicolon could wind up in non-C
+   source code and cause problems.
+   
+   (To elaborate on the rationale for the above requirements:)
+   
+   When the driver interrogates the MCU firmware, it learns the number of
+   defined I/O ports (real or placeholder), and some data about them.  The
+   driver then labels the ports in sequence, from "PA" and up.  For example, if
+   four ports are advertised, then the driver chooses the names "PA", "PB",
+   "PC", and "PD".  If, however, the target MCU has only PB, PC, and PD I/O
+   ports (at the hardware level), and you define array entries for only those
+   three ports, then the driver sees three ports and names them "PA", "PB", and
+   "PC", which is incorrect.  In this case, you would need a placeholder entry
+   for the non-existent "PA".  This isn't a deficiency with the driver.  These
+   implicit names are a protocol optimization which is intended to save space
+   in MCU Flash storage by not having to store port names, and not needing code
+   for transmitting names.
+   
+   When specifying pointers to registers of some real I/O port in a placeholder
+   entry, that other port could be accessed if the USB device driver
+   misbehaves.  However, its DDRx and PORTx registers will not be altered as
+   long as .valid_mask = 0.  NULL would certainly be a more clean and natural
+   choice of expression here, but to allow this, we'd need to add code
+   (increasing Flash size) to handle and avoid null pointer dereferencing.
+   Dereferencing NULL for reading would be fine--it'd be a read from CPU
+   register r0, and that read data would be ANDed with 0 before it gets
+   transmitted back to the USB host--but writing could corrupt program state if
+   GCC generates code which changes r0 and relies on r0 not being modified from
+   outside its control. */
 
 #if defined __AVR_ATmega8__
 
@@ -375,33 +455,15 @@ DEFFUSES(.low = (// Brown-out detection, 4.0 V:
 //#  define USB_CFG_PULLUP_IOPORTNAME	...
 //#  define USB_CFG_PULLUP_BIT		...
 
-DEFGPIOTAB(/* List the defined entries contiguously to easily find the index of
-              an entry by its line number: */
-           TABENT(PORT_B, 0),
-           TABENT(PORT_B, 1),
-           TABENT(PORT_B, 2),
-           TABENT(PORT_B, 3),
-           TABENT(PORT_B, 4),
-           TABENT(PORT_B, 5),
-           TABENT(PORT_C, 0),
-           TABENT(PORT_C, 1),
-           TABENT(PORT_C, 2),
-           TABENT(PORT_C, 3),
-           TABENT(PORT_C, 4),
-           TABENT(PORT_C, 5),
-           TABENT(PORT_D, 0),
-           TABENT(PORT_D, 1),
-           TABENT(PORT_D, 3),
-           TABENT(PORT_D, 5),
-           TABENT(PORT_D, 6),
-           TABENT(PORT_D, 7),
-           /* Undefined entries due to pin conflicts or other reasons: */
-           //TABENT(PORT_B, 6), // XTAL1
-           //TABENT(PORT_B, 7), // XTAL2
-           //TABENT(PORT_C, 6), // /Reset
-           //TABENT(PORT_D, 2), // D+, INT0
-           //TABENT(PORT_D, 4), // D-
-           )
+DEFPORTS(// No PA.
+         {&PORTB, &DDRB, &PINB, 0},
+         // PB6/PB7 used for XTAL1/XTAL2.
+         {&PORTB, &DDRB, &PINB, 0b00111111},
+         // PC6 used for /Reset; no PC7
+         {&PORTC, &DDRC, &PINC, 0b00111111},
+         // PD2 used for INT0 & D+; PD4 used for D-
+         {&PORTD, &DDRD, &PIND, 0b11101011},
+         )
 
 #elif (defined __AVR_ATtiny24__ ||              \
        defined __AVR_ATtiny24A__ ||             \
@@ -429,11 +491,13 @@ DEFFUSES(.low = (// Crystal oscillator, 8+ MHz:
 //#  define USB_CFG_PULLUP_BIT		...
 
 /* Not using INT0 pin for D+ or D- because INT0 is on PB, which doesn't have
-   enough free pins.  To make it work, we'd have to use the RC oscillator to
-   free up XTAL1/XTAL2, or disable /Reset and hope that the reduced drive
+   enough free pins to fit both D+ and D- (which are required by V-USB to be on
+   the same I/O port).  To make it work, we'd have to use the RC oscillator to
+   free up XTAL1/XTAL2, or disable /Reset AND hope that the reduced drive
    strength on that pin doesn't harm USB communication.
 
-   Use PCINT0 to trigger an interrupt on any level change (toggle) of D+. */ 
+   Instead, use PCINT0 to trigger an interrupt on any level change (toggle) of
+   D+. */ 
 #  define USB_INTR_CFG			PCMSK0
 #  define USB_INTR_CFG_SET		(1 << PCINT0)
 #  define USB_INTR_CFG_CLR		0
@@ -443,22 +507,11 @@ DEFFUSES(.low = (// Crystal oscillator, 8+ MHz:
 #  define USB_INTR_PENDING_BIT		PCIF0
 #  define USB_INTR_VECTOR		PCINT0_vect
 
-DEFGPIOTAB(/* List the defined entries contiguously to easily find the index of
-              an entry by its line number: */
-           TABENT(PORT_A, 2),
-           TABENT(PORT_A, 3),
-           TABENT(PORT_A, 4),
-           TABENT(PORT_A, 5),
-           TABENT(PORT_A, 6),
-           TABENT(PORT_A, 7),
-           TABENT(PORT_B, 2),
-           /* Undefined entries due to pin conflicts or other reasons: */
-           //TABENT(PORT_A, 0), // D+, PCINT0
-           //TABENT(PORT_A, 1), // D-
-           //TABENT(PORT_B, 0), // XTAL1
-           //TABENT(PORT_B, 1), // XTAL2
-           //TABENT(PORT_B, 3), // /Reset
-           )
+DEFPORTS(// PA0 used for D+ and PCINT0; PA1 used for D-
+         {&PORTA, &DDRA, &PINA, 0b11111100},
+         // PB0/PB1 used for XTAL1/XTAL2; PB3 used for /Reset; no PB[4:7]
+         {&PORTB, &DDRB, &PINB, 0b00000100},
+         )
 
 #else
 #  error "Unsupported device"

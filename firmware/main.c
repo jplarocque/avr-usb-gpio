@@ -19,35 +19,20 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <string.h>
 #include <avr/io.h>
 #include <avr/wdt.h>
 #include <avr/interrupt.h>
-#include <avr/pgmspace.h>
 #include <util/delay.h>
+#include <util/atomic.h>
 
-// Support macros for usbconfig.h, included by usbdrv.h:
-#define DEFFUSES(...)                           \
-    FUSES = {__VA_ARGS__};
-#define DEFGPIOTAB(...)                                         \
-    static const PROGMEM uint8_t gpiotab[] = {__VA_ARGS__};
-#define TABENT(port, bit) (((port) << 3) | (bit))
-#define PORT_A 0
-#define PORT_B 1
-#define PORT_C 2
-#define PORT_D 3
+#define FROM_MAIN_FIRMWARE
 #include "usbdrv.h"
 #include "common.h"
 
 #define ARRAYLEN(array) (sizeof ((array)) / sizeof ((array)[0]))
-
-static bool
-gpio_base_and_mask(volatile uint8_t **base, uint8_t *mask, uint8_t gpio_num);
-static inline volatile uint8_t *
-PORTx(volatile uint8_t *base);
-static inline volatile uint8_t *
-DDRx(volatile uint8_t *base);
-static inline volatile uint8_t *
-PINx(volatile uint8_t *base);
+#define MAX(x, y) ((x) >= (y) ? (x) : (y))
 
 int __attribute__((noreturn))
 main(void) {
@@ -68,66 +53,87 @@ main(void) {
 usbMsgLen_t
 usbFunctionSetup(uchar data[8]) {
     usbRequest_t *rq = (void *) data;
+    /* Urge GCC to allocate `data` in one of the base pointer register pairs (Y
+       or Z), which are eligible for dereferencing w/ displacement.  Otherwise,
+       it puts `data` in X, which doesn't have displacement, wasting 18 bytes
+       on ADIW & SBIW twiddling to access the desired address. */
+    asm volatile ("" : : "b" (data));
     enum proto_cmd cmd = rq->bRequest;
-    static uint8_t replybuf[1];
+    if ((rq->bmRequestType & USBRQ_TYPE_MASK) != USBRQ_TYPE_VENDOR) return 0;
+    bool dir_in = rq->bmRequestType & USBRQ_DIR_DEVICE_TO_HOST;
+    static uint8_t replybuf[MAX(2U, ARRAYLEN(io_ports))];
     usbMsgPtr = replybuf;
    
-    if (cmd == GET_INFO) {
-        replybuf[0] = ARRAYLEN(gpiotab);
-        return 1;
+    if (cmd == MSG_VALID_MASK && dir_in) {
+        for (uint8_t i = 0; i < ARRAYLEN(io_ports); i++) {
+            replybuf[i] = io_ports[i].valid_mask;
+        }
+        return ARRAYLEN(io_ports);
     }
    
-    // All other requests encode a GPIO number in wIndex.
-    uint8_t gpio_num = rq->wIndex.bytes[0];
-    volatile uint8_t *base;
-    uint8_t mask;
-    if (! gpio_base_and_mask(&base, &mask, gpio_num)) return 0;
-   
+    // All other requests encode a port number in wIndex.
+    if (rq->wIndex.bytes[1] > 0) return 0;
+    uint8_t port_num = rq->wIndex.bytes[0];
+    if (port_num >= ARRAYLEN(io_ports)) return 0;
+    const struct gpio_port *gpio_port = io_ports + port_num;
+    /* Same hack to encourage `gpio_port` to be allocated in a base pointer
+       register pair, where it's really needed.  GCC already does this for
+       `gpio_port`, but that could change at any time. */
+    asm volatile ("" : : "b" (gpio_port));
+    uint8_t valid_mask = gpio_port->valid_mask;
+    
     switch(cmd) {
-    case GPIO_INPUT:
-        *DDRx(base) &= ~mask;
-        return 0;
-       
-    case GPIO_OUTPUT:
-    case GPIO_WRITE:
-        if (rq->wValue.bytes[0]) *PORTx(base) |= mask;
-        else *PORTx(base) &= ~mask;
-        if (cmd == GPIO_OUTPUT) *DDRx(base) |= mask;
-        return 0;
-       
-    case GPIO_READ:
-        replybuf[0] = *PINx(base) & mask;
-        return 1;
-
+    case MSG_PORT_DDR:
+        if (dir_in) {
+            replybuf[0] = *gpio_port->PORTx & valid_mask;
+            replybuf[1] = *gpio_port->DDRx & valid_mask;
+            return 2;
+        } else {
+            /* Pre-fetch and precalculate as much as possible before entering
+               the atomic section. */
+            volatile uint8_t
+                *DDRx = gpio_port->DDRx,
+                *PINx = gpio_port->PINx;
+            uint8_t
+                PORTx_req = rq->wValue.bytes[0],
+                DDRx_req = rq->wValue.bytes[1],
+                DDRx_val,
+                DDRx_clear = DDRx_req | ~valid_mask,
+                DDRx_set = DDRx_req & valid_mask,
+                PINx_new = (*gpio_port->PORTx ^ PORTx_req) & valid_mask;
+            /* Hack to convince GCC to really pre-calculate everything we
+               precalculated above, instead of inside the ATOMIC_BLOCK.
+               Minimizes time spent with interrupts disabled (12 cycles
+               total). */
+            asm volatile ("" : :
+                          "e" (DDRx),
+                          "e" (PINx),
+                          "r" (DDRx_clear),
+                          "r" (DDRx_set),
+                          "r" (PINx_new));
+            ATOMIC_BLOCK(ATOMIC_FORCEON) {
+                /* Until desired output levels are set, only disable any lines
+                   that are now inputs.  We don't want to begin driving any
+                   newly-enabled output lines at the wrong level. */
+                *DDRx = (DDRx_val = *DDRx & DDRx_clear);
+                /* Toggle PORTx bits to get the correct level.  Toggling saves
+                   a boolean operation, compared to reading and updating PORTx
+                   in a masked fashion like we do DDRx. */
+                *PINx = PINx_new;
+                // Safe to enable new outputs now.
+                *DDRx = DDRx_val | DDRx_set;
+            }
+            return 0;
+        }
+    case MSG_PIN:
+        if (dir_in) {
+            replybuf[0] = *gpio_port->PINx & valid_mask;
+            return 1;
+        }
+        break;
     default:
-        return 0;
+        break;
     }
-}
-
-static bool
-gpio_base_and_mask(volatile uint8_t **base, uint8_t *mask, uint8_t no) {
-    if (no < ARRAYLEN(gpiotab)) {
-        uint8_t tabent = pgm_read_byte(&gpiotab[no]);
-        uint8_t port_no = tabent >> 3, bit_no = tabent & 0b111;
-        *base = &PORTB + 3 - 3 * port_no;
-        *mask = 1 << bit_no;
-        return true;
-    } else {
-        return false;
-    }
-}
-
-static inline volatile uint8_t *
-PORTx(volatile uint8_t *base) {
-    return base - 0;
-}
-
-static inline volatile uint8_t *
-DDRx(volatile uint8_t *base) {
-    return base - 1;
-}
-
-static inline volatile uint8_t *
-PINx(volatile uint8_t *base) {
-    return base - 2;
+    
+    return 0;
 }
