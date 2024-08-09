@@ -122,7 +122,7 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
     data->chip.direction_output = direction_output;
     data->chip.get = get;
     data->chip.set = set;
-    data->chip.can_sleep = false;
+    data->chip.can_sleep = true;
 
     usb_set_intfdata(interface, data);
 
