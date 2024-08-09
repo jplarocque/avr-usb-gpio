@@ -146,8 +146,10 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
     int ret;
 
     static const char
-        vendor_name[USB_CFG_VENDOR_NAME_LEN + 1] = {USB_CFG_VENDOR_NAME, '\0'},
-        device_name[USB_CFG_DEVICE_NAME_LEN + 1] = {USB_CFG_DEVICE_NAME, '\0'};
+        /* These name macros expand to a sequence of chars (as required by
+           V-USB). */
+        vendor_name[] = {USB_CFG_VENDOR_NAME, '\0'},
+        device_name[] = {USB_CFG_DEVICE_NAME, '\0'};
     if (! (strcmp(udev->manufacturer, vendor_name) == 0 &&
            strcmp(udev->product, device_name) == 0)) {
         return -ENODEV;
