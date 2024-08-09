@@ -26,7 +26,6 @@
 #include <linux/usb.h>
 #include <linux/slab.h>
 #include <linux/gpio/driver.h>
-#include <linux/spinlock.h>
 
 #include "../../firmware/common.h"
 #include "../../firmware/usbidconfig.h"
@@ -37,10 +36,10 @@ MODULE_DESCRIPTION("AVR-GPIO USB driver");
 MODULE_VERSION("0.1");
 
 struct avr_gpio {
+    struct mutex lock;
     struct usb_device *udev;
     struct gpio_chip chip; //this is our GPIO chip
     u32 timeout;
-    spinlock_t lock;
     u8 buf[1];
 };
 
@@ -109,7 +108,7 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
     // Increase ref count.  Make sure you call usb_put_dev() in disconnect().
     data->udev = usb_get_dev(udev);
     data->timeout = 100;
-    spin_lock_init(&data->lock);
+    mutex_init(&data->lock);
 
     data->chip.label = "avr-gpio";
     // Optional device providing the GPIOs:
@@ -126,14 +125,14 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
 
     usb_set_intfdata(interface, data);
 
-    spin_lock(&data->lock);
+    mutex_lock(&data->lock);
     ret = usb_control_msg(data->udev, usb_rcvctrlpipe(data->udev, 0),
                           GET_INFO,
                           USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_IN,
                           0, 0,
                           data->buf, 1,
                           data->timeout);
-    spin_unlock(&data->lock);
+    mutex_unlock(&data->lock);
     if (ret != 1) {
         dev_err(&data->udev->dev, "GET_INFO failed (ret %d)\n",
                 ret);
@@ -176,14 +175,14 @@ direction_input(struct gpio_chip *chip, unsigned int offset) {
     struct avr_gpio *data = container_of(chip, struct avr_gpio, chip);
     int ret;
 
-    spin_lock(&data->lock);
+    mutex_lock(&data->lock);
     ret = usb_control_msg(data->udev, usb_sndctrlpipe(data->udev, 0),
                           GPIO_INPUT,
                           USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_OUT,
                           0, offset,
                           NULL, 0,
                           data->timeout);
-    spin_unlock(&data->lock);
+    mutex_unlock(&data->lock);
     if (ret != 0) {
         dev_err(chip->parent, "GPIO_INPUT %d failed (ret %d)\n",
                 offset, ret);
@@ -198,14 +197,14 @@ direction_output(struct gpio_chip *chip, unsigned int offset, int value) {
     struct avr_gpio *data = container_of(chip, struct avr_gpio, chip);
     int ret;
 
-    spin_lock(&data->lock);
+    mutex_lock(&data->lock);
     ret = usb_control_msg(data->udev, usb_sndctrlpipe(data->udev, 0),
                           GPIO_OUTPUT,
                           USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_OUT,
                           !!value, offset,
                           NULL, 0,
                           data->timeout);
-    spin_unlock(&data->lock);
+    mutex_unlock(&data->lock);
     if (ret != 0) {
         dev_err(chip->parent, "GPIO_OUTPUT %d failed (ret %d)\n",
                 offset, ret);
@@ -220,14 +219,14 @@ get(struct gpio_chip *chip, unsigned int offset) {
     struct avr_gpio *data = container_of(chip, struct avr_gpio, chip);
     int ret;
 
-    spin_lock(&data->lock);
+    mutex_lock(&data->lock);
     ret = usb_control_msg(data->udev, usb_rcvctrlpipe(data->udev, 0),
                           GPIO_READ,
                           USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_IN,
                           0, offset,
                           data->buf, 1,
                           data->timeout);
-    spin_unlock(&data->lock);
+    mutex_unlock(&data->lock);
     if (ret != 1) {
         dev_err(chip->parent, "GPIO_READ %d failed (ret %d)\n",
                 offset, ret);
@@ -242,14 +241,14 @@ set(struct gpio_chip *chip, unsigned int offset, int value) {
     struct avr_gpio *data = container_of(chip, struct avr_gpio, chip);
     int ret;
 
-    spin_lock(&data->lock);
+    mutex_lock(&data->lock);
     ret = usb_control_msg(data->udev, usb_sndctrlpipe(data->udev, 0),
                           GPIO_WRITE,
                           USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_OUT,
                           !!value, offset,
                           NULL, 0,
                           data->timeout);
-    spin_unlock(&data->lock);
+    mutex_unlock(&data->lock);
     if (ret != 0) {
         dev_err(chip->parent, "GPIO_WRITE %d = %d failed (ret %d)\n",
                 offset, !!value, ret);
