@@ -85,8 +85,9 @@ struct avr_gpio_board {
            gpiolib API.  There's no way to pass the valid-mask directly during
            initialization.
        
-       For maximum reliability, the device is responsible for enforcing the
-       valid mask.  Therefore, this driver does not. */
+       The device firmware is responsible for enforcing the valid mask (writes
+       are no-ops, reads return 0 or some other constant data).  However, it
+       looks like gpiolib also enforces it for us. */
     uint8_t *valid_mask; // length = MAX_PORTS
     uint8_t buf[2]; // Misc USB transfer buffer; can't be stack-allocated
     size_t port_count;
