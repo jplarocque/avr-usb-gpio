@@ -361,22 +361,31 @@ free_board(struct avr_gpio_board *board) {
 
 static int
 direction_input(struct gpio_chip *gc, unsigned int offset) {
-    // Note: `offset` has been validated by the API.
     struct avr_gpio_port *port = gpiochip_get_data(gc);
+    struct avr_gpio_board *board = port->board;
+    mutex_lock(&board->lock);
+    // Note: `offset` has been validated by the API.
     port->direction &= ~(1U << offset);
-    return update_PORTx_DDRx(port);
+    int ret = update_PORTx_DDRx(port);
+    mutex_unlock(&board->lock);
+    return ret;
 }
 
 static int
 direction_output(struct gpio_chip *gc, unsigned int offset, int value) {
-    // Note: `offset` has been validated by the API.
     struct avr_gpio_port *port = gpiochip_get_data(gc);
-    /* It looks like gpiolib.c always passes a normalized `value` of 0 or 1,
+    struct avr_gpio_board *board = port->board;
+    mutex_lock(&board->lock);
+    /* Note: `offset` has been validated by the API.
+       
+       It looks like gpiolib.c always passes a normalized `value` of 0 or 1,
        but that's not assured by the API. */
     port->direction |= 1U << offset;
     port->value &= ~(1U << offset);
     port->value |= !!value << offset;
-    return update_PORTx_DDRx(port);
+    int ret = update_PORTx_DDRx(port);
+    mutex_unlock(&board->lock);
+    return ret;
 }
 
 static int
@@ -440,18 +449,24 @@ set(struct gpio_chip *gc, unsigned int offset, int value) {
 static void
 set_multiple(struct gpio_chip *gc, unsigned long *mask, unsigned long *bits) {
     struct avr_gpio_port *port = gpiochip_get_data(gc);
+    struct avr_gpio_board *board = port->board;
     uint8_t mask_ = *mask;
+    mutex_lock(&board->lock);
     port->value &= ~mask_;
     port->value |= *bits & mask_;
     update_PORTx_DDRx(port);
+    mutex_unlock(&board->lock);
 }
 
 static int
 set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config) {
     struct avr_gpio_port *port = gpiochip_get_data(gc);
+    struct avr_gpio_board *board = port->board;
     uint8_t mask = 1U << offset;
     enum pin_config_param param = pinconf_to_config_param(config);
     uint32_t arg = pinconf_to_config_argument(config);
+    int ret;
+    mutex_lock(&board->lock);
     switch (param) {
     case PIN_CONFIG_BIAS_DISABLE:
         port->bias_en &= ~mask;
@@ -464,6 +479,9 @@ set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config) {
         if (arg == 0) {
             port->bias_en |= mask;
             port->bias_total &= ~mask;
+        } else {
+            ret = 0;
+            goto end;
         }
         break;
     case PIN_CONFIG_BIAS_PULL_UP:
@@ -472,9 +490,13 @@ set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config) {
         else port->bias_total |= mask;
         break;
     default:
-        return -ENOTSUPP;
+        ret = -ENOTSUPP;
+        goto end;
     }
-    return update_PORTx_DDRx(port);
+    ret = update_PORTx_DDRx(port);
+ end:
+    mutex_unlock(&board->lock);
+    return ret;
 }
 
 static int
@@ -486,7 +508,6 @@ update_PORTx_DDRx(struct avr_gpio_port *port) {
         PORTx = (port->direction & port->value) | port->bias_en;
     int32_t PORTx_DDRx = PORTx | ((int32_t) DDRx << 8U);
     if (PORTx_DDRx == port->actual_PORTx_DDRx) return 0;
-    mutex_lock(&board->lock);
     int ret = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
                               MSG_PORT_DDR,
                               USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_OUT,
@@ -494,7 +515,6 @@ update_PORTx_DDRx(struct avr_gpio_port *port) {
                               port->id,
                               NULL, 0,
                               TIMEOUT);
-    mutex_unlock(&board->lock);
     if (unlikely(ret < 0)) {
         dev_err(&udev->dev,
                 "MSG_PORT_DDR[%u] = 0x%04X (OUT) failed (error %d)\n",
