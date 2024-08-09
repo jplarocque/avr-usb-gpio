@@ -127,10 +127,9 @@ static int
 update_PORTx_DDRx(struct avr_gpio_port *port);
 
 static struct usb_device_id id_table[] = {
-    { USB_DEVICE(USB_VENDOR_ID, USB_DEVICE_ID) },
+    {USB_DEVICE(USB_VENDOR_ID, USB_DEVICE_ID)},
     {},
 };
-
 MODULE_DEVICE_TABLE(usb, id_table);
 
 static struct usb_driver avr_gpio_driver = {
@@ -139,19 +138,7 @@ static struct usb_driver avr_gpio_driver = {
     .probe = usb_probe,
     .disconnect = usb_disconnect,
 };
-
-static int __init
-mod_init(void) {
-    return usb_register(&avr_gpio_driver);
-}
-module_init(mod_init);
-
-static void __exit
-mod_exit(void) {
-    pr_info(KBUILD_MODNAME ": Unloading driver");
-    usb_deregister(&avr_gpio_driver);
-}
-module_exit(mod_exit);
+module_usb_driver(avr_gpio_driver);
 
 static int
 usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
