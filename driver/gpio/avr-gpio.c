@@ -51,6 +51,14 @@ struct avr_gpio_port {
     /* For identifying this port on the wire (NOT an index into .ports[] of
        `struct avr_gpio_board`). */
     uint8_t id;
+    /* Mask of usable I/O lines.  Used only by init_valid_mask(), where it must
+       be looked up later due to the gpiolib API.  (There's no way to pass the
+       valid-mask directly during gpiochip initialization.)
+       
+       The device firmware is responsible for enforcing the valid mask (writes
+       are no-ops, reads return 0 or some other constant data).  However, it
+       looks like gpiolib also enforces it for us. */
+    uint8_t valid_mask;
     /* Per-line flags/masks.
 
        To support "total" biasing with simplicity, we manipulate high-level
@@ -65,30 +73,14 @@ struct avr_gpio_port {
        pull). */
     uint8_t bias_en, bias_total;
     /* Actual last-known register states, encoded in the on-wire format
-       (PORTx | (DDRx << 8)).  May be set to a value outside [0, UINT16_MAX] to
-       invalidate any previously-known value upon error. */
+       (PORTx | (DDRx << 8)).  May be set to a value outside [0, (uint16_t) -1]
+       to invalidate any previously-known value upon error. */
     int32_t actual_PORTx_DDRx;
 };
 
 struct avr_gpio_board {
     struct mutex lock;
     struct usb_interface *intf;
-    /* Maps port IDs to masks of usable I/O lines for that port.
-       
-       Used only at initialization time:
-       
-         - By usb_probe(); the stack would be a nicer choice for such a small,
-           fixed-size buffer, but that isn't suitable for DMA by
-           usb_control_msg().
-         
-         - By init_valid_mask(), where it must be looked up later due to the
-           gpiolib API.  There's no way to pass the valid-mask directly during
-           initialization.
-       
-       The device firmware is responsible for enforcing the valid mask (writes
-       are no-ops, reads return 0 or some other constant data).  However, it
-       looks like gpiolib also enforces it for us. */
-    uint8_t *valid_mask; // length = MAX_PORTS
     uint8_t buf[2]; // Misc USB transfer buffer; can't be stack-allocated
     size_t port_count;
     /* Array of available ports which have a non-zero number of valid I/O
@@ -129,6 +121,11 @@ avr_gpio_msg(struct usb_interface *intf, uint8_t request,
              const char *request_fmt, uint8_t dir,
              uint16_t value, uint16_t index,
              void *data, size_t min_size, size_t max_size);
+static inline int
+avr_gpio_msg2_in(struct usb_interface *intf, uint8_t request,
+                 const char *request_fmt,
+                 uint16_t value, uint16_t index,
+                 void *data, size_t min_size, size_t max_size);
 
 static struct usb_device_id id_table[] = {
     {USB_DEVICE(USB_VENDOR_ID, USB_DEVICE_ID)},
@@ -161,20 +158,12 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     void *devg = devres_open_group(&intf->dev, NULL, GFP_KERNEL);
     if (devg == NULL) return -ENOMEM;
     struct avr_gpio_board *board = NULL;
-    uint8_t *valid_mask = NULL;
+    uint8_t valid_mask[MAX_PORTS], line_count[MAX_PORTS];
     /* From this point forward, all error handling must go through `goto err`
        in order to ensure matching usb_put_intf() call. */
 
-    size_t valid_mask_size = array_size(MAX_PORTS,
-                                        sizeof board->valid_mask[0]);
-    valid_mask = devm_kzalloc(&intf->dev, valid_mask_size, GFP_KERNEL);
-    if (valid_mask == NULL) {
-        ret = -ENOMEM;
-        goto err;
-    }
-    ret = avr_gpio_msg(intf, MSG_VALID_MASK, "MSG_VALID_MASK", USB_DIR_IN,
-                       0, 0,
-                       valid_mask, 0, valid_mask_size);
+    ret = avr_gpio_msg2_in(intf, MSG_VALID_MASK, "MSG_VALID_MASK", 0, 0,
+                           valid_mask, 0, sizeof valid_mask);
     if (ret < 0) goto err;
     /* Number of ports as reported by the device.  port_count may end up being
        less than this value, since we prune empty ports. */
@@ -195,6 +184,17 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         ret = -ENOTRECOVERABLE;
         goto err;
     }
+
+    ret = avr_gpio_msg2_in(intf, MSG_LINE_COUNT, "MSG_LINE_COUNT", 0, 0,
+                           line_count, 0, sizeof line_count);
+    if (ret < 0) goto err;
+    if (ret != dev_port_count) {
+        dev_err(&intf->dev,
+                "Port count mismatch: %zu per MSG_VALID_MASK; %d per MSG_LINE_COUNT\n",
+                dev_port_count, ret);
+        ret = -EPROTO;
+        goto err;
+    }
     
     board = devm_kzalloc(&intf->dev, struct_size(board, ports, port_count),
                          GFP_KERNEL);
@@ -205,13 +205,26 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     usb_set_intfdata(intf, board);
     mutex_init(&board->lock);
     board->intf = usb_get_intf(intf);
-    board->valid_mask = valid_mask;
     board->port_count = port_count;
     struct avr_gpio_port *port = board->ports, *ports_end = port + port_count;
     // FIXME: ensure USB path and board serial number info get printed here
     dev_info(&intf->dev, "adding board:\n");
     for (size_t port_id = 0; port_id < dev_port_count; port_id++) {
+        if (line_count[port_id] > 8) {
+            dev_err(&intf->dev,
+                    "MSG_LINE_COUNT (IN) failed: invalid response %u\n",
+                    line_count[port_id]);
+            ret = -EPROTO;
+            goto err;
+        }
         if (valid_mask[port_id] == 0) continue;
+        if (valid_mask[port_id] & ~((1U << line_count[port_id]) - 1)) {
+            dev_err(&intf->dev,
+                    "MSG_VALID_MASK 0x%02X includes bits outside of MSG_LINE_COUNT %u\n",
+                    valid_mask[port_id], line_count[port_id]);
+            ret = -EPROTO;
+            goto err;
+        }
         if (WARN(port == ports_end, "Exceeded allocated ports\n")) {
             ret = -ENOTRECOVERABLE;
             goto err;
@@ -239,10 +252,11 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         port->gc.set_config = set_config;
         port->gc.init_valid_mask = init_valid_mask;
         port->gc.can_sleep = true;
-        port->gc.ngpio = 8;
+        port->gc.ngpio = line_count[port_id];
         
         port->board = board;
         port->id = port_id;
+        port->valid_mask = valid_mask[port_id];
         ret = fetch_port_state(port);
         if (ret < 0) goto err;
         
@@ -299,7 +313,7 @@ static int
 init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
                 unsigned int ngpios) {
     struct avr_gpio_port *port = gpiochip_get_data(gc);
-    *valid_mask = port->board->valid_mask[port->id];
+    *valid_mask = port->valid_mask;
     return 0;
 }
 
@@ -513,5 +527,25 @@ avr_gpio_msg(struct usb_interface *intf, uint8_t request,
     dir_label = dir_out ? "OUT" : "IN";
     dev_err(&intf->dev, "%s (%s) failed (%s)\n",
             request_label, dir_label, detail);
+    return ret;
+}
+
+/* Like avr_gpio_msg(), but input only, into any memory (not just DMAable
+   memory).  Allocates and frees temporary dynamic memory. */
+static inline int
+avr_gpio_msg2_in(struct usb_interface *intf, uint8_t request,
+                 const char *request_fmt,
+                 uint16_t value, uint16_t index,
+                 void *data, size_t min_size, size_t max_size) {
+    char *buf = kzalloc(max_size, GFP_KERNEL);
+    if (buf == NULL) return -ENOMEM;
+    int ret = avr_gpio_msg(intf, request, request_fmt, USB_DIR_IN,
+                           value, index, buf, min_size, max_size);
+    if (ret < 0) {
+        // Error; no-op.
+    } else {
+        memcpy(data, buf, ret);
+    }
+    kfree(buf);
     return ret;
 }

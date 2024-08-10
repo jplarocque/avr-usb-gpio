@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+#include <assert.h>
 #include <avr/io.h>
 #include <avr/wdt.h>
 #include <avr/interrupt.h>
@@ -61,26 +62,34 @@ usbFunctionSetup(uchar data[8]) {
     enum proto_cmd cmd = rq->bRequest;
     if ((rq->bmRequestType & USBRQ_TYPE_MASK) != USBRQ_TYPE_VENDOR) return 0;
     bool dir_in = rq->bmRequestType & USBRQ_DIR_DEVICE_TO_HOST;
-    static uint8_t replybuf[MAX(2U, ARRAYLEN(io_ports))];
+    static uint8_t replybuf[MAX(2U, ARRAYLEN(io_port_regs))];
     usbMsgPtr = replybuf;
-   
-    if (cmd == MSG_VALID_MASK && dir_in) {
-        for (uint8_t i = 0; i < ARRAYLEN(io_ports); i++) {
-            replybuf[i] = io_ports[i].valid_mask;
+
+    if (dir_in) {
+        switch(cmd) {
+        case MSG_VALID_MASK:
+            usbMsgPtr = (uint8_t *) io_port_valid;
+            return ARRAYLEN(io_port_valid);
+        case MSG_LINE_COUNT:
+            usbMsgPtr = (uint8_t *) io_port_line_count;
+            return ARRAYLEN(io_port_line_count);
+        default:
+            break;
         }
-        return ARRAYLEN(io_ports);
     }
-   
+    
     // All other requests encode a port number in wIndex.
     if (rq->wIndex.bytes[1] > 0) return 0;
     uint8_t port_num = rq->wIndex.bytes[0];
-    if (port_num >= ARRAYLEN(io_ports)) return 0;
-    const struct gpio_port *gpio_port = io_ports + port_num;
+    if (port_num >= ARRAYLEN(io_port_valid)) return 0;
+    uint8_t valid_mask = io_port_valid[port_num];
+    static_assert(ARRAYLEN(io_port_regs) == ARRAYLEN(io_port_valid),
+                  "io_port_regs[]/io_port_valid[] length mismatch");
+    const struct gpio_port *gpio_port = io_port_regs + port_num;
     /* Same hack to encourage `gpio_port` to be allocated in a base pointer
        register pair, where it's really needed.  GCC already does this for
        `gpio_port`, but that could change at any time. */
     asm volatile ("" : : "b" (gpio_port));
-    uint8_t valid_mask = gpio_port->valid_mask;
     
     switch(cmd) {
     case MSG_PORT_DDR:

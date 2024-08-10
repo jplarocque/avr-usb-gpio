@@ -351,21 +351,25 @@ macro myAssemblerMacro
    V-USB, that means defining it here, in this header file. */
 struct gpio_port {
     volatile uint8_t *PORTx, *DDRx, *PINx;
-    /* A bitmap/mask of which lines of this port are available for use by the
-       USB host.  If this is a placeholder port, then specify 0 (all lines
-       unavailable). */
-    uint8_t valid_mask;
-    uint8_t _pad;
+#if ! __AVR_HAVE_MUL__
+    uint8_t _pad[2];
+#endif
 };
 
 #  define DEFFUSES(...)                         \
     FUSES = {__VA_ARGS__};
-#  define DEFPORTS(...)                                         \
-    static const struct gpio_port io_ports[] = {__VA_ARGS__};
+#  define DEFPORTVALID(...)                                     \
+    static const uint8_t io_port_valid[] = {__VA_ARGS__};
+#  define DEFPORTLINECOUNT(...)                                 \
+    static const uint8_t io_port_line_count[] = {__VA_ARGS__};
+#  define DEFPORTREGS(...)                                              \
+    static const struct gpio_port io_port_regs[] = {__VA_ARGS__};
 #else
 // No-op macros for V-USB source files:
 #  define DEFFUSES(...)
-#  define DEFPORTS(...)
+#  define DEFPORTVALID(...)
+#  define DEFPORTLINECOUNT(...)
+#  define DEFPORTREGS(...)
 #endif
 
 /* The DEFFUSES() macro builds on the avr-libc FUSES macro to define which
@@ -373,39 +377,45 @@ struct gpio_port {
    preprocessor conditionals and C constant expressions logic/arithmetic in
    order to tune the fuses as needed for build variations, etc.
    
-   The DEFPORTS() macro defines an array of `struct gpio_port`.  Each struct
-   represents a possible I/O port and expresses information about it.  The
-   array as a whole represents all I/O port names starting from "PA", and
-   continuing in sequence up to the last (highest) named I/O port of the target
-   MCU.  If the MCU doesn't have a "PA" I/O port (or any other port name
-   interspersed in that sequence), an array entry still needs to be defined for
-   that port name with a placeholder struct, so that the USB host-side device
-   driver may correctly infer the port name of following structs.
+   The DEFPORTVALID(), DEFPORTLINECOUNT(), and DEFPORTREGS() macros defines
+   three parallel arrays, where each index represents a possible I/O port, and
+   the different arrays express different information about it.  They represent
+   all I/O port names starting from "PA", and continuing in sequence up to the
+   last (highest) named I/O port of the target MCU.  If the MCU doesn't have a
+   "PA" I/O port (or any other port name interspersed in that sequence), an
+   array entry still needs to be defined for that port name with a placeholder
+   struct, so that the USB host-side device driver may correctly infer the port
+   name of following structs.
 
    EXCEPTION: Atmel/Microchip don't define a "PI" I/O port for any AVR MCU
    (determined by checking avr-libc <avr/io*.h> headers), maybe to avoid
    confusion with the digit "1".  The driver DOES take this into account, so if
    you have ports numbered higher than PI, do NOT represent a placeholder port
-   for "PI" in the DEFPORTS() initializers.
+   for "PI" in the macro initializers.
+
+   Specify a comma-separated list of `uint8_t` valid-masks in DEFPORTVALID()
+   (or 0 for placeholder ports).
+
+   Specify a comma-separated list of `uint8_t` line counts (in [1,8]) in
+   DEFPORTLINECOUNT() (or 0 for placeholder ports).
    
    Specify a comma-separated list of `struct gpio_port` initializers in
-   DEFPORTS().  To define a real port, use pointers to its registers, and a
-   mask of allowed/valid lines on the port.  For example:
+   DEFPORTREGS().  To define a real port, use pointers to its registers.  For
+   example:
    
-       {&PORTC, &DDRC, &PINC, 0b00111111}
+       {&PORTC, &DDRC, &PINC}
 
-   To define a placeholder entry, write an initializer which specifies a
-   .valid_mask = 0, and use pointers to the correct registers of any other
-   single valid I/O port (even if that port is represented as a real port in
-   another array index).  For example:
+   To define a placeholder entry in DEFPORTREGS(), use pointers to the correct
+   registers of any other single valid I/O port (this will be some other port
+   which is represented as a real port in another array index).  For example:
    
-       {&PORTB, &DDRB, &PINB, 0},
+       {&PORTB, &DDRB, &PINB},
 
-   WARNING: Do not use a semicolon after DEFFUSES() or DEFPORTS().  The regular
-   macros for main.c expand to include a terminating semicolon, so adding your
-   own is not necessary.  In the case of expansion of the no-op macros from
-   within V-USB code, an external trailing semicolon could wind up in non-C
-   source code and cause problems.
+   WARNING: Do not use a semicolon after any of these macro invocations.  The
+   regular macros for main.c expand to include a terminating semicolon, so
+   adding your own is not necessary.  In the case of expansion of the no-op
+   macros from within V-USB code, an external trailing semicolon could wind up
+   in non-C source code and cause problems.
    
    (To elaborate on the rationale for the above requirements:)
    
@@ -455,15 +465,21 @@ DEFFUSES(.low = (// Brown-out detection, 4.0 V:
 //#  define USB_CFG_PULLUP_IOPORTNAME	...
 //#  define USB_CFG_PULLUP_BIT		...
 
-DEFPORTS(// No PA.
-         {&PORTB, &DDRB, &PINB, 0},
-         // PB6/PB7 used for XTAL1/XTAL2.
-         {&PORTB, &DDRB, &PINB, 0b00111111},
-         // PC6 used for /Reset; no PC7
-         {&PORTC, &DDRC, &PINC, 0b00111111},
-         // PD2 used for INT0 & D+; PD4 used for D-
-         {&PORTD, &DDRD, &PIND, 0b11101011},
-         )
+DEFPORTVALID(// no PA
+             0,
+             // PB6/PB7 used for XTAL1/XTAL2.
+             0b00111111,
+             // PC6 used for /Reset; no PC7
+             0b00111111,
+             // PD2 used for INT0 & D+; PD4 used for D-
+             0b11101011,
+             )
+DEFPORTLINECOUNT(0, 8, 7, 8)
+DEFPORTREGS({&PORTB, &DDRB, &PINB}, // Placeholder
+            {&PORTB, &DDRB, &PINB},
+            {&PORTC, &DDRC, &PINC},
+            {&PORTD, &DDRD, &PIND},
+            )
 
 #elif (defined __AVR_ATtiny24__ ||              \
        defined __AVR_ATtiny24A__ ||             \
@@ -507,11 +523,15 @@ DEFFUSES(.low = (// Crystal oscillator, 8+ MHz:
 #  define USB_INTR_PENDING_BIT		PCIF0
 #  define USB_INTR_VECTOR		PCINT0_vect
 
-DEFPORTS(// PA0 used for D+ and PCINT0; PA1 used for D-
-         {&PORTA, &DDRA, &PINA, 0b11111100},
-         // PB0/PB1 used for XTAL1/XTAL2; PB3 used for /Reset; no PB[4:7]
-         {&PORTB, &DDRB, &PINB, 0b00000100},
-         )
+DEFPORTVALID(// PA0 used for D+ and PCINT0; PA1 used for D-
+             0b11111100,
+             // PB0/PB1 used for XTAL1/XTAL2; PB3 used for /Reset; no PB[4:7]
+             0b00000100,
+             )
+DEFPORTLINECOUNT(8, 4)
+DEFPORTREGS({&PORTA, &DDRA, &PINA},
+            {&PORTB, &DDRB, &PINB},
+            )
 
 #else
 #  error "Unsupported device"

@@ -25,6 +25,9 @@ enum proto_cmd {
     // IN: get array of valid I/O line masks for each port
     MSG_VALID_MASK,
     
+    // IN: get array of physically-present line counts for each port
+    MSG_LINE_COUNT,
+    
     // IN: get [PORT[index], DDR[index]]
     // OUT: set PORT[index] = value[0], DDR[index] = value[1] (little-endian)
     MSG_PORT_DDR,
