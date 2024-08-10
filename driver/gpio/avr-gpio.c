@@ -99,6 +99,8 @@ init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
 static void
 usb_disconnect(struct usb_interface *intf);
 static int
+request(struct gpio_chip *gc, unsigned int offset);
+static int
 direction_input(struct gpio_chip *gc, unsigned int offset);
 static int
 direction_output(struct gpio_chip *gc, unsigned int offset, int value);
@@ -242,6 +244,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         port->gc.parent = &intf->dev;
         port->gc.owner = THIS_MODULE;
         port->gc.base = -1;
+        port->gc.request = request;
         port->gc.direction_input = direction_input;
         port->gc.direction_output = direction_output;
         port->gc.get = get;
@@ -355,6 +358,17 @@ usb_disconnect(struct usb_interface *intf) {
         dev_info(&intf->dev, "  %s\n", board->ports[i].gc.label);
     }
     usb_put_intf(board->intf);
+}
+
+static int
+request(struct gpio_chip *gc, unsigned int offset) {
+    /* No-op.  However, this triggers behavior in gpiolib which differs from
+       what would happen if .request were NULL.
+
+       Specifically, the valid_mask is only honored upon open if there is a
+       .request function defined for a gpiochip.  This is probably a bug, and
+       is undocumented. */
+    return 0;
 }
 
 static int
