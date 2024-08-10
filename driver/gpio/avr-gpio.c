@@ -72,7 +72,7 @@ struct avr_gpio_port {
 
 struct avr_gpio_board {
     struct mutex lock;
-    struct usb_device *udev;
+    struct usb_interface *intf;
     /* Maps port IDs to masks of usable I/O lines for that port.
        
        Used only at initialization time:
@@ -158,7 +158,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     struct avr_gpio_board *board = NULL;
     uint8_t *valid_mask = NULL;
     /* From this point forward, all error handling must go through `goto err`
-       in order to ensure matching usb_put_dev() call. */
+       in order to ensure matching usb_put_intf() call. */
 
     size_t valid_mask_size = array_size(MAX_PORTS,
                                         sizeof board->valid_mask[0]);
@@ -174,7 +174,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
                           valid_mask, valid_mask_size,
                           TIMEOUT);
     if (ret < 0) {
-        dev_err(&udev->dev, "MSG_VALID_MASK (IN) failed (error %d)\n",
+        dev_err(&intf->dev, "MSG_VALID_MASK (IN) failed (error %d)\n",
                 -ret);
         goto err;
     } else if (ret > valid_mask_size) {
@@ -186,9 +186,9 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
        less than this value, since we prune empty ports. */
     size_t dev_port_count = ret;
     if (dev_port_count == 0) {
-        dev_warn(&udev->dev, "Device has no ports\n");
+        dev_warn(&intf->dev, "Device has no ports\n");
     } else if (dev_port_count >= MAX_PORTS) {
-        dev_warn(&udev->dev,
+        dev_warn(&intf->dev,
                  "Device has excessive number of ports; limiting to %d\n",
                  MAX_PORTS);
     }
@@ -210,12 +210,12 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     }
     usb_set_intfdata(intf, board);
     mutex_init(&board->lock);
-    board->udev = usb_get_dev(udev);
+    board->intf = usb_get_intf(intf);
     board->valid_mask = valid_mask;
     board->port_count = port_count;
     struct avr_gpio_port *port = board->ports, *ports_end = port + port_count;
     // FIXME: ensure USB path and board serial number info get printed here
-    dev_info(&udev->dev, "%s: adding board:\n", KBUILD_MODNAME);
+    dev_info(&intf->dev, "adding board:\n");
     for (size_t port_id = 0; port_id < dev_port_count; port_id++) {
         if (valid_mask[port_id] == 0) continue;
         if (WARN(port == ports_end, "Exceeded allocated ports\n")) {
@@ -253,7 +253,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         if (ret < 0) goto err;
         
         unsigned int valid_count = hweight8(valid_mask[port_id]);
-        dev_info(&udev->dev, "  %s: %u line%s\n",
+        dev_info(&intf->dev, "  %s: %u line%s\n",
                  port->gc.label, valid_count, valid_count == 1 ? "" : "s");
         
         /* After this function returns successfully, the gpiochip is available,
@@ -261,7 +261,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
            *board and *port before this call. */
         ret = devm_gpiochip_add_data(&intf->dev, &port->gc, port);
         if (ret < 0) {
-            dev_err(&udev->dev, "devm_gpiochip_add_data() failed (ret %d)\n",
+            dev_err(&intf->dev, "devm_gpiochip_add_data() failed (ret %d)\n",
                     ret);
             goto err;
         }
@@ -272,7 +272,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     return 0;
 
  err:
-    if (board != NULL) usb_put_dev(board->udev);
+    if (board != NULL) usb_put_intf(board->intf);
     devres_release_group(&intf->dev, devg);
     return ret;
 }
@@ -281,7 +281,8 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
 static int
 fetch_port_state(struct avr_gpio_port *port) {
     struct avr_gpio_board *board = port->board;
-    struct usb_device *udev = board->udev;
+    struct usb_interface *intf = board->intf;
+    struct usb_device *udev = interface_to_usbdev(intf);
     struct {
         uint8_t PORTx, DDRx;
     } __packed *buf = (void *) board->buf;
@@ -296,7 +297,7 @@ fetch_port_state(struct avr_gpio_port *port) {
                               buf, sizeof *buf,
                               TIMEOUT);
     if (unlikely(ret < sizeof *buf)) {
-        dev_err(&udev->dev, "MSG_PORT_DDR[%u] (IN) failed ", port->id);
+        dev_err(&intf->dev, "MSG_PORT_DDR[%u] (IN) failed ", port->id);
         if (ret < 0) {
             pr_cont("(error %d)\n", -ret);
             return ret;
@@ -327,7 +328,7 @@ init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
 static void
 usb_disconnect(struct usb_interface *intf) {
     struct avr_gpio_board *board = usb_get_intfdata(intf);
-    usb_put_dev(board->udev);
+    usb_put_intf(board->intf);
 }
 
 static int
@@ -379,7 +380,8 @@ static int
 get_raw(struct gpio_chip *gc) {
     struct avr_gpio_port *port = gpiochip_get_data(gc);
     struct avr_gpio_board *board = port->board;
-    struct usb_device *udev = board->udev;
+    struct usb_interface *intf = board->intf;
+    struct usb_device *udev = interface_to_usbdev(intf);
     struct {
         uint8_t data;
     } __packed *buf = (void *) board->buf;
@@ -396,7 +398,7 @@ get_raw(struct gpio_chip *gc) {
                               TIMEOUT);
     mutex_unlock(&board->lock);
     if (unlikely(ret < sizeof *buf)) {
-        dev_err(&udev->dev, "MSG_PIN[%u] (IN) failed ", port->id);
+        dev_err(&intf->dev, "MSG_PIN[%u] (IN) failed ", port->id);
         if (ret < 0) {
             pr_cont("(error %d)\n", -ret);
             return ret;
@@ -473,7 +475,8 @@ set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config) {
 static int
 update_PORTx_DDRx(struct avr_gpio_port *port) {
     struct avr_gpio_board *board = port->board;
-    struct usb_device *udev = board->udev;
+    struct usb_interface *intf = board->intf;
+    struct usb_device *udev = interface_to_usbdev(intf);
     uint8_t
         DDRx = port->direction | (port->bias_en & port->bias_total),
         PORTx = (port->direction & port->value) | port->bias_en;
@@ -487,7 +490,7 @@ update_PORTx_DDRx(struct avr_gpio_port *port) {
                               NULL, 0,
                               TIMEOUT);
     if (unlikely(ret < 0)) {
-        dev_err(&udev->dev,
+        dev_err(&intf->dev,
                 "MSG_PORT_DDR[%u] = 0x%04X (OUT) failed (error %d)\n",
                 port->id, PORTx_DDRx, -ret);
         /* We don't know the device's PORTx and DDRx state, so invalidate our
