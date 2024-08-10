@@ -92,8 +92,6 @@ struct avr_gpio_board {
 static int
 usb_probe(struct usb_interface *intf, const struct usb_device_id *id);
 static int
-fetch_port_state(struct avr_gpio_port *port);
-static int
 init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
                 unsigned int ngpios);
 static void
@@ -117,7 +115,9 @@ set_multiple(struct gpio_chip *gc, unsigned long *mask, unsigned long *bits);
 static int
 set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config);
 static int
-update_PORTx_DDRx(struct avr_gpio_port *port);
+read_PORTx_DDRx(struct avr_gpio_port *port);
+static int
+write_PORTx_DDRx(struct avr_gpio_port *port);
 static int
 avr_gpio_msg(struct usb_interface *intf, uint8_t request,
              const char *request_fmt, uint8_t dir,
@@ -265,7 +265,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         port->board = board;
         port->id = port_id;
         port->valid_mask = valid_mask[port_id];
-        ret = fetch_port_state(port);
+        ret = read_PORTx_DDRx(port);
         if (ret < 0) goto err;
 
         // pr_cont() doesn't work with dev_info().  :)
@@ -318,30 +318,6 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     return ret;
 }
 
-/* Must be called from initialization context (no locking is performed). */
-static int
-fetch_port_state(struct avr_gpio_port *port) {
-    struct avr_gpio_board *board = port->board;
-    struct usb_interface *intf = board->intf;
-    struct {
-        uint8_t PORTx, DDRx;
-    } __packed *buf = (void *) board->buf;
-    if (WARN_ON(sizeof *buf != 2) ||
-        WARN_ON(sizeof *buf > sizeof board->buf)) {
-        return -ENOTRECOVERABLE;
-    }
-    int ret = avr_gpio_msg(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u]", USB_DIR_IN,
-                           0, port->id,
-                           buf, sizeof *buf, sizeof *buf);
-    if (ret < 0) return ret;
-    port->direction = buf->DDRx;
-    port->value = buf->PORTx;
-    port->bias_en = buf->PORTx & ~buf->DDRx;
-    port->bias_total = 0;
-    port->actual_PORTx_DDRx = buf->PORTx | ((int32_t) buf->DDRx << 8U);
-    return 0;
-}
-
 static int
 init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
                 unsigned int ngpios) {
@@ -378,7 +354,7 @@ direction_input(struct gpio_chip *gc, unsigned int offset) {
     mutex_lock(&board->lock);
     // Note: `offset` has been validated by the API.
     port->direction &= ~(1U << offset);
-    int ret = update_PORTx_DDRx(port);
+    int ret = write_PORTx_DDRx(port);
     mutex_unlock(&board->lock);
     return ret;
 }
@@ -395,7 +371,7 @@ direction_output(struct gpio_chip *gc, unsigned int offset, int value) {
     port->direction |= 1U << offset;
     port->value &= ~(1U << offset);
     port->value |= !!value << offset;
-    int ret = update_PORTx_DDRx(port);
+    int ret = write_PORTx_DDRx(port);
     mutex_unlock(&board->lock);
     return ret;
 }
@@ -451,7 +427,7 @@ set_multiple(struct gpio_chip *gc, unsigned long *mask, unsigned long *bits) {
     mutex_lock(&board->lock);
     port->value &= ~mask_;
     port->value |= *bits & mask_;
-    update_PORTx_DDRx(port);
+    write_PORTx_DDRx(port);
     mutex_unlock(&board->lock);
 }
 
@@ -490,14 +466,42 @@ set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config) {
         ret = -ENOTSUPP;
         goto end;
     }
-    ret = update_PORTx_DDRx(port);
+    ret = write_PORTx_DDRx(port);
  end:
     mutex_unlock(&board->lock);
     return ret;
 }
 
+/*
+ * Low-level functions.  The mutex is not locked by these functions, so do that
+ * yourself, or otherwise protect against concurrency.
+ */
+
 static int
-update_PORTx_DDRx(struct avr_gpio_port *port) {
+read_PORTx_DDRx(struct avr_gpio_port *port) {
+    struct avr_gpio_board *board = port->board;
+    struct usb_interface *intf = board->intf;
+    struct {
+        uint8_t PORTx, DDRx;
+    } __packed *buf = (void *) board->buf;
+    if (WARN_ON(sizeof *buf != 2) ||
+        WARN_ON(sizeof *buf > sizeof board->buf)) {
+        return -ENOTRECOVERABLE;
+    }
+    int ret = avr_gpio_msg(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u]", USB_DIR_IN,
+                           0, port->id,
+                           buf, sizeof *buf, sizeof *buf);
+    if (ret < 0) return ret;
+    port->direction = buf->DDRx;
+    port->value = buf->PORTx;
+    port->bias_en = buf->PORTx & ~buf->DDRx;
+    port->bias_total = 0;
+    port->actual_PORTx_DDRx = buf->PORTx | ((int32_t) buf->DDRx << 8U);
+    return 0;
+}
+
+static int
+write_PORTx_DDRx(struct avr_gpio_port *port) {
     struct avr_gpio_board *board = port->board;
     struct usb_interface *intf = board->intf;
     uint8_t
