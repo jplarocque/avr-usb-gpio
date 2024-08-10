@@ -306,6 +306,10 @@ init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
 static void
 usb_disconnect(struct usb_interface *intf) {
     struct avr_gpio_board *board = usb_get_intfdata(intf);
+    dev_info(&intf->dev, "board removed:\n");
+    for (size_t i = 0; i < board->port_count; i++) {
+        dev_info(&intf->dev, "  %s\n", board->ports[i].gc.label);
+    }
     usb_put_intf(board->intf);
 }
 
