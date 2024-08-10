@@ -198,19 +198,20 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     
     board = devm_kzalloc(&intf->dev, struct_size(board, ports, port_count),
                          GFP_KERNEL);
-    if (board == NULL) {
-        ret = -ENOMEM;
-        goto err;
-    }
+    if (board == NULL) goto nomem;
     usb_set_intfdata(intf, board);
     mutex_init(&board->lock);
     board->intf = usb_get_intf(intf);
     board->port_count = port_count;
     struct avr_gpio_port *port = board->ports, *ports_end = port + port_count;
+
+    unsigned int valid_lines = 0, invalid_lines = 0;
+    
     // FIXME: ensure USB path and board serial number info get printed here
     dev_info(&intf->dev, "adding board:\n");
     for (size_t port_id = 0; port_id < dev_port_count; port_id++) {
-        if (line_count[port_id] > 8) {
+        const char *names[8];
+        if (line_count[port_id] > ARRAY_SIZE(names)) {
             dev_err(&intf->dev,
                     "MSG_LINE_COUNT (IN) failed: invalid response %u\n",
                     line_count[port_id]);
@@ -234,12 +235,10 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         char port_letter = 'A' + port_id;
         // "PI" is skipped by Atmel in their port numbering.
         if (port_letter >= 'I') port_letter++;
+        
         port->gc.label = devm_kasprintf(&intf->dev, GFP_KERNEL,
                                         "%s P%c", KBUILD_MODNAME, port_letter);
-        if (port->gc.label == NULL) {
-            ret = -ENOMEM;
-            goto err;
-        }
+        if (port->gc.label == NULL) goto nomem;
         port->gc.parent = &intf->dev;
         port->gc.owner = THIS_MODULE;
         port->gc.base = -1;
@@ -253,16 +252,40 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         port->gc.init_valid_mask = init_valid_mask;
         port->gc.can_sleep = true;
         port->gc.ngpio = line_count[port_id];
+        for (size_t i = 0; i < line_count[port_id]; i++) {
+            names[i] = devm_kasprintf(&intf->dev, GFP_KERNEL, "P%c%zu",
+                                      port_letter, i);
+            if (names[i] == NULL) goto nomem;
+        }
+        port->gc.names = names;
         
         port->board = board;
         port->id = port_id;
         port->valid_mask = valid_mask[port_id];
         ret = fetch_port_state(port);
         if (ret < 0) goto err;
-        
-        unsigned int valid_count = hweight8(valid_mask[port_id]);
-        dev_info(&intf->dev, "  %s: %u line%s\n",
-                 port->gc.label, valid_count, valid_count == 1 ? "" : "s");
+
+        // pr_cont() doesn't work with dev_info().  :)
+        char *names_concat = kasprintf(GFP_KERNEL, "%s", ""),
+            *names_concat_old;
+        if (names_concat == NULL) goto nomem;
+        for (size_t i = 0; i < line_count[port_id]; i++) {
+            const char *name;
+            if (valid_mask[port_id] & (1U << i)) {
+                name = names[i];
+                valid_lines++;
+            } else {
+                name = "_";
+                invalid_lines++;
+            }
+            names_concat_old = names_concat;
+            names_concat = kasprintf(GFP_KERNEL, "%s %s",
+                                     names_concat_old, name);
+            kfree(names_concat_old);
+            if (names_concat == NULL) goto nomem;
+        }
+        dev_info(&intf->dev, "  %s:%s\n", port->gc.label, names_concat);
+        kfree(names_concat);
         
         /* After this function returns successfully, the gpiochip is available,
            so all data required by our gpio functions must be filled into
@@ -276,9 +299,16 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         
         port++;
     }
+    dev_info(&intf->dev,
+             "%zu port(s), %u line(s) available, %u line(s) reserved\n",
+             port_count, valid_lines, invalid_lines);
     devres_remove_group(&intf->dev, devg);
     return 0;
-
+    
+ nomem:
+    ret = -ENOMEM;
+    goto err;
+    
  err:
     if (board != NULL) usb_put_intf(board->intf);
     devres_release_group(&intf->dev, devg);
