@@ -124,6 +124,11 @@ static int
 set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config);
 static int
 update_PORTx_DDRx(struct avr_gpio_port *port);
+static int
+avr_gpio_msg(struct usb_interface *intf, uint8_t request,
+             const char *request_fmt, uint8_t dir,
+             uint16_t value, uint16_t index,
+             void *data, size_t min_size, size_t max_size);
 
 static struct usb_device_id id_table[] = {
     {USB_DEVICE(USB_VENDOR_ID, USB_DEVICE_ID)},
@@ -167,21 +172,10 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         ret = -ENOMEM;
         goto err;
     }
-    ret = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
-                          MSG_VALID_MASK,
-                          USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_IN,
-                          0, 0,
-                          valid_mask, valid_mask_size,
-                          TIMEOUT);
-    if (ret < 0) {
-        dev_err(&intf->dev, "MSG_VALID_MASK (IN) failed (error %d)\n",
-                -ret);
-        goto err;
-    } else if (ret > valid_mask_size) {
-        BUG(); // Buffer overflow!
-        ret = -EOVERFLOW;
-        goto err;
-    }
+    ret = avr_gpio_msg(intf, MSG_VALID_MASK, "MSG_VALID_MASK", USB_DIR_IN,
+                       0, 0,
+                       valid_mask, 0, valid_mask_size);
+    if (ret < 0) goto err;
     /* Number of ports as reported by the device.  port_count may end up being
        less than this value, since we prune empty ports. */
     size_t dev_port_count = ret;
@@ -282,7 +276,6 @@ static int
 fetch_port_state(struct avr_gpio_port *port) {
     struct avr_gpio_board *board = port->board;
     struct usb_interface *intf = board->intf;
-    struct usb_device *udev = interface_to_usbdev(intf);
     struct {
         uint8_t PORTx, DDRx;
     } __packed *buf = (void *) board->buf;
@@ -290,25 +283,10 @@ fetch_port_state(struct avr_gpio_port *port) {
         WARN_ON(sizeof *buf > sizeof board->buf)) {
         return -ENOTRECOVERABLE;
     }
-    int ret = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
-                              MSG_PORT_DDR,
-                              USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_IN,
-                              0, port->id,
-                              buf, sizeof *buf,
-                              TIMEOUT);
-    if (unlikely(ret < sizeof *buf)) {
-        dev_err(&intf->dev, "MSG_PORT_DDR[%u] (IN) failed ", port->id);
-        if (ret < 0) {
-            pr_cont("(error %d)\n", -ret);
-            return ret;
-        } else {
-            pr_cont("(short read, %d byte(s))\n", ret);
-            return -EPROTO;
-        }
-    } else if (unlikely(ret > sizeof *buf)) {
-        BUG(); // Buffer overflow!
-        return -EOVERFLOW;
-    }
+    int ret = avr_gpio_msg(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u]", USB_DIR_IN,
+                           0, port->id,
+                           buf, sizeof *buf, sizeof *buf);
+    if (ret < 0) return ret;
     port->direction = buf->DDRx;
     port->value = buf->PORTx;
     port->bias_en = buf->PORTx & ~buf->DDRx;
@@ -381,7 +359,6 @@ get_raw(struct gpio_chip *gc) {
     struct avr_gpio_port *port = gpiochip_get_data(gc);
     struct avr_gpio_board *board = port->board;
     struct usb_interface *intf = board->intf;
-    struct usb_device *udev = interface_to_usbdev(intf);
     struct {
         uint8_t data;
     } __packed *buf = (void *) board->buf;
@@ -390,26 +367,11 @@ get_raw(struct gpio_chip *gc) {
         return -ENOTRECOVERABLE;
     }
     mutex_lock(&board->lock);
-    int ret = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
-                              MSG_PIN,
-                              USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_IN,
-                              0, port->id,
-                              buf, sizeof *buf,
-                              TIMEOUT);
+    int ret = avr_gpio_msg(intf, MSG_PIN, "MSG_PIN[%u]", USB_DIR_IN,
+                           0, port->id,
+                           buf, sizeof *buf, sizeof *buf);
     mutex_unlock(&board->lock);
-    if (unlikely(ret < sizeof *buf)) {
-        dev_err(&intf->dev, "MSG_PIN[%u] (IN) failed ", port->id);
-        if (ret < 0) {
-            pr_cont("(error %d)\n", -ret);
-            return ret;
-        } else {
-            pr_cont("(short read, %d byte(s))\n", ret);
-            return -EPROTO;
-        }
-    } else if (unlikely(ret > sizeof *buf)) {
-        BUG(); // Buffer overflow!
-        return -EOVERFLOW;
-    }
+    if (ret < 0) return ret;
     return buf->data;
 }
 
@@ -476,29 +438,76 @@ static int
 update_PORTx_DDRx(struct avr_gpio_port *port) {
     struct avr_gpio_board *board = port->board;
     struct usb_interface *intf = board->intf;
-    struct usb_device *udev = interface_to_usbdev(intf);
     uint8_t
         DDRx = port->direction | (port->bias_en & port->bias_total),
         PORTx = (port->direction & port->value) | port->bias_en;
     int32_t PORTx_DDRx = PORTx | ((int32_t) DDRx << 8U);
     if (PORTx_DDRx == port->actual_PORTx_DDRx) return 0;
-    int ret = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
-                              MSG_PORT_DDR,
-                              USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_OUT,
-                              PORTx_DDRx,
-                              port->id,
-                              NULL, 0,
-                              TIMEOUT);
+    int ret = avr_gpio_msg(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u] = 0x%04X",
+                           USB_DIR_OUT,
+                           PORTx_DDRx, port->id,
+                           NULL, 0, 0);
     if (unlikely(ret < 0)) {
-        dev_err(&intf->dev,
-                "MSG_PORT_DDR[%u] = 0x%04X (OUT) failed (error %d)\n",
-                port->id, PORTx_DDRx, -ret);
         /* We don't know the device's PORTx and DDRx state, so invalidate our
            local copies to force a future update. */
         port->actual_PORTx_DDRx = -1;
         return ret;
     }
-    WARN_ON_ONCE(ret > 0);
     port->actual_PORTx_DDRx = PORTx_DDRx;
     return 0;
+}
+
+static int
+avr_gpio_msg(struct usb_interface *intf, uint8_t request,
+             const char *request_fmt, uint8_t dir,
+             uint16_t value, uint16_t index,
+             void *data, size_t min_size, size_t max_size) {
+    struct usb_device *udev = interface_to_usbdev(intf);
+    bool dir_out;
+    unsigned int pipe;
+    switch (dir) {
+    case USB_DIR_OUT:
+        dir_out = true;
+        pipe = usb_sndctrlpipe(udev, 0);
+        break;
+    case USB_DIR_IN:
+        dir_out = false;
+        pipe = usb_rcvctrlpipe(udev, 0);
+        break;
+    default:
+        return -EINVAL;
+    }
+    uint8_t request_type = dir | USB_RECIP_DEVICE | USB_TYPE_VENDOR;
+    int ret = usb_control_msg(udev, pipe, request, request_type,
+                              value, index,
+                              data, min(max_size, (size_t) (uint16_t) -1),
+                              TIMEOUT);
+    char request_label[128], detail[128];
+    const char *dir_label;
+    if (unlikely(ret < 0)) {
+        snprintf(detail, sizeof detail, "error %d", -ret);
+        goto err;
+    } else if (unlikely((unsigned int) ret > max_size)) {
+        if (! dir_out) BUG(); // Buffer overflow!
+        snprintf(detail, sizeof detail,
+                 "%s %d byte(s) past end of buffer (%zu byte(s))",
+                 dir_out ? "transmit read" : "receive overflowed",
+                 ret, max_size);
+        ret = -EOVERFLOW;
+        goto err;
+    } else if (unlikely((unsigned int) ret < min_size)) {
+        snprintf(detail, sizeof detail, "short %s, %d byte(s)",
+                 dir_out ? "write" : "read", ret);
+        ret = -EPROTO;
+        goto err;
+    }
+    return ret;
+    
+ err:
+    snprintf(request_label, sizeof request_label,
+             request_fmt, index, value);
+    dir_label = dir_out ? "OUT" : "IN";
+    dev_err(&intf->dev, "%s (%s) failed (%s)\n",
+            request_label, dir_label, detail);
+    return ret;
 }
