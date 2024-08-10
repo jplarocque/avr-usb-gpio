@@ -98,16 +98,14 @@ struct avr_gpio_board {
 };
 
 static int
-usb_probe(struct usb_interface *interface, const struct usb_device_id *id);
+usb_probe(struct usb_interface *intf, const struct usb_device_id *id);
 static int
 fetch_port_state(struct avr_gpio_port *port);
 static int
 init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
                 unsigned int ngpios);
 static void
-usb_disconnect(struct usb_interface *interface);
-static void
-free_board(struct avr_gpio_board *board);
+usb_disconnect(struct usb_interface *intf);
 static int
 direction_input(struct gpio_chip *gc, unsigned int offset);
 static int
@@ -142,8 +140,8 @@ static struct usb_driver avr_gpio_driver = {
 module_usb_driver(avr_gpio_driver);
 
 static int
-usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
-    struct usb_device *udev = interface_to_usbdev(interface);
+usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
+    struct usb_device *udev = interface_to_usbdev(intf);
     int ret;
 
     static const char
@@ -155,14 +153,16 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
            strcmp(udev->product, device_name) == 0)) {
         return -ENODEV;
     }
+    void *devg = devres_open_group(&intf->dev, NULL, GFP_KERNEL);
+    if (devg == NULL) return -ENOMEM;
     struct avr_gpio_board *board = NULL;
     uint8_t *valid_mask = NULL;
-    /* From this point forward, all error paths must go through `goto err` in
-       order to ensure matching usb_put_dev() call. */
+    /* From this point forward, all error handling must go through `goto err`
+       in order to ensure matching usb_put_dev() call. */
 
     size_t valid_mask_size = array_size(MAX_PORTS,
                                         sizeof board->valid_mask[0]);
-    valid_mask = devm_kzalloc(&udev->dev, valid_mask_size, GFP_KERNEL);
+    valid_mask = devm_kzalloc(&intf->dev, valid_mask_size, GFP_KERNEL);
     if (valid_mask == NULL) {
         ret = -ENOMEM;
         goto err;
@@ -202,13 +202,13 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
         goto err;
     }
     
-    board = devm_kzalloc(&udev->dev, struct_size(board, ports, port_count),
+    board = devm_kzalloc(&intf->dev, struct_size(board, ports, port_count),
                          GFP_KERNEL);
     if (board == NULL) {
         ret = -ENOMEM;
         goto err;
     }
-    usb_set_intfdata(interface, board);
+    usb_set_intfdata(intf, board);
     mutex_init(&board->lock);
     board->udev = usb_get_dev(udev);
     board->valid_mask = valid_mask;
@@ -227,13 +227,13 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
         char port_letter = 'A' + port_id;
         // "PI" is skipped by Atmel in their port numbering.
         if (port_letter >= 'I') port_letter++;
-        port->gc.label = devm_kasprintf(&udev->dev, GFP_KERNEL,
+        port->gc.label = devm_kasprintf(&intf->dev, GFP_KERNEL,
                                         "%s P%c", KBUILD_MODNAME, port_letter);
         if (port->gc.label == NULL) {
             ret = -ENOMEM;
             goto err;
         }
-        port->gc.parent = &udev->dev;
+        port->gc.parent = &intf->dev;
         port->gc.owner = THIS_MODULE;
         port->gc.base = -1;
         port->gc.direction_input = direction_input;
@@ -256,7 +256,10 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
         dev_info(&udev->dev, "  %s: %u line%s\n",
                  port->gc.label, valid_count, valid_count == 1 ? "" : "s");
         
-        ret = devm_gpiochip_add_data(&udev->dev, &port->gc, port);
+        /* After this function returns successfully, the gpiochip is available,
+           so all data required by our gpio functions must be filled into
+           *board and *port before this call. */
+        ret = devm_gpiochip_add_data(&intf->dev, &port->gc, port);
         if (ret < 0) {
             dev_err(&udev->dev, "devm_gpiochip_add_data() failed (ret %d)\n",
                     ret);
@@ -265,12 +268,12 @@ usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
         
         port++;
     }
+    devres_remove_group(&intf->dev, devg);
     return 0;
 
  err:
-    devm_kfree(&udev->dev, valid_mask);
-    if (board != NULL) board->valid_mask = NULL;
-    free_board(board);
+    if (board != NULL) usb_put_dev(board->udev);
+    devres_release_group(&intf->dev, devg);
     return ret;
 }
 
@@ -322,31 +325,9 @@ init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
 }
 
 static void
-usb_disconnect(struct usb_interface *interface) {
-    struct avr_gpio_board *board = usb_get_intfdata(interface);
-    free_board(board);
-}
-
-static void
-free_board(struct avr_gpio_board *board) {
-    if (board == NULL) return;
-    struct usb_device *udev = board->udev;
-    for (size_t i = 0; i < board->port_count; i++) {
-        if (board->ports[i].gc.gpiodev != NULL) {
-            gpiochip_remove(&board->ports[i].gc);
-        }
-        /* DO NOT FREE board->ports[i].gc.label.
-
-           devm_gpiochip_add_data() copies the label to its own self-managed
-           dynamic memory, so it's not our memory to free.  Unfortunately, this
-           isn't documented, so we can't take advantage of this behavior by
-           passing a static buffer or something at initialization.  The only
-           correct solution is to let devm clean up our original memory
-           allocation eventually. */
-    }
-    devm_kfree(&udev->dev, board->valid_mask);
-    devm_kfree(&udev->dev, board);
-    usb_put_dev(udev);
+usb_disconnect(struct usb_interface *intf) {
+    struct avr_gpio_board *board = usb_get_intfdata(intf);
+    usb_put_dev(board->udev);
 }
 
 static int
