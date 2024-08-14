@@ -35,7 +35,7 @@
 #define ARRAYLEN(array) (sizeof ((array)) / sizeof ((array)[0]))
 #define MAX(x, y) ((x) >= (y) ? (x) : (y))
 
-int __attribute__((noreturn))
+int
 main(void) {
     wdt_enable(WDTO_2S);
     usbInit();
