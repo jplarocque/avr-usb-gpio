@@ -53,6 +53,12 @@ main(void) {
 
 usbMsgLen_t
 usbFunctionSetup(uchar data[8]) {
+#if ! USB_CFG_CHECK_CRC
+    if (usbCrc16(data, 8 + 2) != 0x4FFE) {
+        return 0;
+    }
+#endif
+    
     usbRequest_t *rq = (void *) data;
     /* Urge GCC to allocate `data` in one of the base pointer register pairs (Y
        or Z), which are eligible for dereferencing w/ displacement.  Otherwise,
