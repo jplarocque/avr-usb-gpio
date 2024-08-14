@@ -22,6 +22,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/overflow.h>
+#include <linux/version.h>
 
 #include <linux/device.h>
 #include <linux/usb.h>
@@ -35,6 +36,14 @@ MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Jean-Paul Larocque <jpl@ftlvisual.com>");
 MODULE_DESCRIPTION("AVR-GPIO USB driver");
 MODULE_VERSION("0.1");
+
+/* Old versions of gpiolib can crash the system when GPIO chips are dynamically
+   removed.  Refuse to build on old kernels. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
+#  error "Linux kernel 6.8 or higher required; 6.9 or higher preferred"
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0)
+#  warning "Scary (but benign) warnings are logged upon unplug for kernel versions older than 6.9"
+#endif
 
 /* Actual maximum is expected to be 11 (PA..PL on e.g. ATmega640, with "PI"
    skipped due to Atmel port numbering). */
