@@ -106,31 +106,36 @@ usbFunctionSetup(uchar data[8]) {
             uint8_t
                 PORTx_req = rq->wValue.bytes[0],
                 DDRx_req = rq->wValue.bytes[1],
-                DDRx_val,
-                DDRx_clear = DDRx_req | ~valid_mask,
-                DDRx_set = DDRx_req & valid_mask,
                 PINx_new = (*gpio_port->PORTx ^ PORTx_req) & valid_mask;
-            /* Hack to convince GCC to really pre-calculate everything we
-               precalculated above, instead of inside the ATOMIC_BLOCK.
-               Minimizes time spent with interrupts disabled (12 cycles
-               total). */
-            asm volatile ("" : :
-                          "e" (DDRx),
-                          "e" (PINx),
-                          "r" (DDRx_clear),
-                          "r" (DDRx_set),
-                          "r" (PINx_new));
-            ATOMIC_BLOCK(ATOMIC_FORCEON) {
-                /* Until desired output levels are set, only disable any lines
-                   that are now inputs.  We don't want to begin driving any
-                   newly-enabled output lines at the wrong level. */
-                *DDRx = (DDRx_val = *DDRx & DDRx_clear);
-                /* Toggle PORTx bits to get the correct level.  Toggling saves
-                   a boolean operation, compared to reading and updating PORTx
-                   in a masked fashion like we do DDRx. */
+            if (((*DDRx ^ DDRx_req) & valid_mask) == 0) {
+                // Since DDRx isn't changing, we can skip the atomic block.
                 *PINx = PINx_new;
-                // Safe to enable new outputs now.
-                *DDRx = DDRx_val | DDRx_set;
+            } else {
+                uint8_t DDRx_val,
+                    DDRx_clear = DDRx_req | ~valid_mask,
+                    DDRx_set = DDRx_req & valid_mask;
+                /* Hack to convince GCC to really pre-calculate everything we
+                   precalculated above, instead of inside the ATOMIC_BLOCK.
+                   Minimizes time spent with interrupts disabled (12 cycles
+                   total). */
+                asm volatile ("" : :
+                              "e" (DDRx),
+                              "e" (PINx),
+                              "r" (DDRx_clear),
+                              "r" (DDRx_set),
+                              "r" (PINx_new));
+                ATOMIC_BLOCK(ATOMIC_FORCEON) {
+                    /* Until desired output levels are set, only disable any lines
+                       that are now inputs.  We don't want to begin driving any
+                       newly-enabled output lines at the wrong level. */
+                    *DDRx = (DDRx_val = *DDRx & DDRx_clear);
+                    /* Toggle PORTx bits to get the correct level.  Toggling saves
+                       a boolean operation, compared to reading and updating PORTx
+                       in a masked fashion like we do DDRx. */
+                    *PINx = PINx_new;
+                    // Safe to enable new outputs now.
+                    *DDRx = DDRx_val | DDRx_set;
+                }
             }
             return 0;
         }
