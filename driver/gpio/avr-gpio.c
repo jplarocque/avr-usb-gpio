@@ -99,6 +99,8 @@ usb_disconnect(struct usb_interface *intf);
 static int
 request(struct gpio_chip *gc, unsigned int offset);
 static int
+get_direction(struct gpio_chip *gc, unsigned int offset);
+static int
 direction_input(struct gpio_chip *gc, unsigned int offset);
 static int
 direction_output(struct gpio_chip *gc, unsigned int offset, int value);
@@ -245,6 +247,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         port->gc.owner = THIS_MODULE;
         port->gc.base = -1;
         port->gc.request = request;
+        port->gc.get_direction = get_direction;
         port->gc.direction_input = direction_input;
         port->gc.direction_output = direction_output;
         port->gc.get = get;
@@ -345,6 +348,13 @@ request(struct gpio_chip *gc, unsigned int offset) {
        .request function defined for a gpiochip.  This is probably a bug, and
        is undocumented. */
     return 0;
+}
+
+static int
+get_direction(struct gpio_chip *gc, unsigned int offset) {
+    struct avr_gpio_port *port = gpiochip_get_data(gc);
+    return (port->direction & offset
+            ? GPIO_LINE_DIRECTION_OUT : GPIO_LINE_DIRECTION_IN);
 }
 
 static int
