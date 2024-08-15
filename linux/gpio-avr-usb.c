@@ -164,7 +164,7 @@ static struct usb_device_id id_table[] = {
 MODULE_DEVICE_TABLE(usb, id_table);
 
 static struct usb_driver gpio_avr_usb = {
-    .name = KBUILD_MODNAME,
+    .name = "gpio-avr-usb",
     .id_table = id_table,
     .probe = usb_probe,
     .disconnect = usb_disconnect,
@@ -267,7 +267,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         if (port_letter >= 'I') port_letter++;
         
         port->gc.label = devm_kasprintf(&intf->dev, GFP_KERNEL,
-                                        "%s P%c", KBUILD_MODNAME, port_letter);
+                                        "P%c", port_letter);
         if (port->gc.label == NULL) goto nomem;
         port->gc.parent = &intf->dev;
         port->gc.owner = THIS_MODULE;
