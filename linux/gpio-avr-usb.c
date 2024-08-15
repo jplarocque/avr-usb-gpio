@@ -107,6 +107,11 @@ static int
 init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
                 unsigned int ngpios);
 static void
+summarize_gpiochip_info(struct gpio_chip *gc,
+                        char *names, size_t names_size,
+                        unsigned int *valid_lines,
+                        unsigned int *invalid_lines);
+static void
 usb_disconnect(struct usb_interface *intf);
 static int
 request(struct gpio_chip *gc, unsigned int offset);
@@ -133,11 +138,12 @@ read_PORTx_DDRx(struct port *port);
 static int
 write_PORTx_DDRx(struct port *port);
 static int
-xfer(struct usb_interface *intf, uint8_t request, const char *request_fmt,
+xfer(struct port *port, struct usb_interface *intf,
+     uint8_t request, const char *request_fmt,
      uint8_t dir, uint16_t value, uint16_t index,
      void *data, size_t min_size, size_t max_size);
 static void
-xfer_printk(const char *level, struct usb_interface *intf,
+xfer_printk(const char *level, struct port *port, struct usb_interface *intf,
             const char *request_fmt,
             uint8_t dir, uint16_t value, uint16_t index,
             const char *detail_fmt, ...);
@@ -146,14 +152,16 @@ xfer2_in(struct usb_interface *intf, uint8_t request, const char *request_fmt,
          uint16_t value, uint16_t index,
          void *data, size_t min_size, size_t max_size);
 
-#define xfer_err(intf, request_fmt, dir, value, index, detail_fmt, ...) \
+#define xfer_err(port, intf, request_fmt, dir, value, index,            \
+                 detail_fmt, ...)                                       \
     do {                                                                \
-        xfer_printk(KERN_ERR, (intf), (request_fmt), (dir),             \
+        xfer_printk(KERN_ERR, (port), (intf), (request_fmt), (dir),     \
                     (value), (index), (detail_fmt), ##__VA_ARGS__);     \
     } while (false)
-#define xfer_warn(intf, request_fmt, dir, value, index, detail_fmt, ...) \
+#define xfer_warn(port, intf, request_fmt, dir, value, index,           \
+                  detail_fmt, ...)                                      \
     do {                                                                \
-        xfer_printk(KERN_WARNING, (intf), (request_fmt), (dir),         \
+        xfer_printk(KERN_WARNING, (port), (intf), (request_fmt), (dir), \
                     (value), (index), (detail_fmt), ##__VA_ARGS__);     \
     } while (false)
 
@@ -296,28 +304,6 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         port->valid_mask = valid_mask[port_id];
         ret = read_PORTx_DDRx(port);
         if (ret < 0) goto err;
-
-        // pr_cont() doesn't work with dev_info().  :)
-        char *names_concat = kasprintf(GFP_KERNEL, "%s", ""),
-            *names_concat_old;
-        if (names_concat == NULL) goto nomem;
-        for (size_t i = 0; i < line_count[port_id]; i++) {
-            const char *name;
-            if (valid_mask[port_id] & (1U << i)) {
-                name = names[i];
-                valid_lines++;
-            } else {
-                name = "_";
-                invalid_lines++;
-            }
-            names_concat_old = names_concat;
-            names_concat = kasprintf(GFP_KERNEL, "%s %s",
-                                     names_concat_old, name);
-            kfree(names_concat_old);
-            if (names_concat == NULL) goto nomem;
-        }
-        dev_info(&intf->dev, "  %s:%s\n", port->gc.label, names_concat);
-        kfree(names_concat);
         
         /* After this function returns successfully, the gpiochip is available,
            so all data required by our gpio functions must be filled into
@@ -328,6 +314,13 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
                     ret);
             goto err;
         }
+        
+        char names_concat[33];
+        summarize_gpiochip_info(&port->gc, names_concat, sizeof names_concat,
+                                &valid_lines, &invalid_lines);
+        dev_info(&intf->dev, "  %s \"%s\":%s\n",
+                 dev_name(gpio_device_to_device(port->gc.gpiodev)),
+                 port->gc.label, names_concat);
         
         port++;
     }
@@ -356,11 +349,41 @@ init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
 }
 
 static void
+summarize_gpiochip_info(struct gpio_chip *gc,
+                        char *names, size_t names_size,
+                        unsigned int *valid_lines,
+                        unsigned int *invalid_lines) {
+    struct port *port = gpiochip_get_data(gc);
+    if (! WARN_ON_ONCE(names_size < 1)) *names = '\0';
+    char *names_end = names + names_size;
+    for (size_t i = 0; i < gc->ngpio; i++) {
+        const char *name;
+        if (port->valid_mask & (1U << i)) {
+            name = gc->names[i];
+            if (valid_lines != NULL) (*valid_lines)++;
+        } else {
+            name = "_";
+            if (invalid_lines != NULL) (*invalid_lines)++;
+        }
+        /* Don't break if we run out of room, since we want to keep counting
+           lines. */
+        if (! WARN_ON_ONCE(names_end - names < 2)) *names++ = ' ';
+        else names = names_end;
+        ssize_t ret = strscpy(names, name, names_end - names);
+        if (WARN_ON_ONCE(ret < 0)) names = names_end;
+        else names += ret;
+    }
+}
+
+static void
 usb_disconnect(struct usb_interface *intf) {
     struct board *board = usb_get_intfdata(intf);
     dev_info(&intf->dev, "board removed:\n");
     for (size_t i = 0; i < board->port_count; i++) {
-        dev_info(&intf->dev, "  %s\n", board->ports[i].gc.label);
+        struct gpio_chip *gc = &board->ports[i].gc;
+        dev_info(&intf->dev, "  %s \"%s\"\n",
+                 dev_name(gpio_device_to_device(gc->gpiodev)),
+                 gc->label);
     }
     usb_put_intf(board->intf);
 }
@@ -441,7 +464,7 @@ get_raw(struct gpio_chip *gc) {
         return -ENOTRECOVERABLE;
     }
     mutex_lock(&board->lock);
-    int ret = xfer(intf, MSG_PIN, "MSG_PIN[%u]", USB_DIR_IN,
+    int ret = xfer(port, intf, MSG_PIN, "MSG_PIN[%u]", USB_DIR_IN,
                    0, port->id,
                    buf, sizeof *buf, sizeof *buf);
     mutex_unlock(&board->lock);
@@ -524,7 +547,7 @@ read_PORTx_DDRx(struct port *port) {
         WARN_ON(sizeof *buf > sizeof board->buf)) {
         return -ENOTRECOVERABLE;
     }
-    int ret = xfer(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u]", USB_DIR_IN,
+    int ret = xfer(port, intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u]", USB_DIR_IN,
                    0, port->id,
                    buf, sizeof *buf, sizeof *buf);
     if (ret < 0) return ret;
@@ -545,7 +568,7 @@ write_PORTx_DDRx(struct port *port) {
         PORTx = (port->direction & port->value) | port->bias_en;
     int32_t PORTx_DDRx = PORTx | ((int32_t) DDRx << 8U);
     if (PORTx_DDRx == port->actual_PORTx_DDRx) return 0;
-    int ret = xfer(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u] = 0x%04X",
+    int ret = xfer(port, intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u] = 0x%04X",
                    USB_DIR_OUT,
                    PORTx_DDRx, port->id,
                    NULL, 0, 0);
@@ -560,7 +583,8 @@ write_PORTx_DDRx(struct port *port) {
 }
 
 static int
-xfer(struct usb_interface *intf, uint8_t request, const char *request_fmt,
+xfer(struct port *port, struct usb_interface *intf,
+     uint8_t request, const char *request_fmt,
      uint8_t dir,
      uint16_t value, uint16_t index,
      void *data, size_t min_size, size_t max_size) {
@@ -595,24 +619,24 @@ xfer(struct usb_interface *intf, uint8_t request, const char *request_fmt,
         case ECOMM: // Received too fast
         case ENOSR: // Couldn't send fast enough
             if (tries < RETRIES) {
-                xfer_warn(intf, request_fmt, dir, value, index,
+                xfer_warn(port, intf, request_fmt, dir, value, index,
                           "(error %d, try %d); retrying",
                           -ret, tries);
                 if (tries > 1) msleep(RETRY_DELAY_ms);
                 goto retry;
             } else {
-                xfer_err(intf, request_fmt, dir, value, index,
+                xfer_err(port, intf, request_fmt, dir, value, index,
                          "(error %d, try %d); giving up",
                          -ret, tries);
             }
             break;
         default:
-            xfer_err(intf, request_fmt, dir, value, index,
+            xfer_err(port, intf, request_fmt, dir, value, index,
                              "(error %d)", -ret);
         }
     } else if (unlikely((unsigned int) ret > max_size)) {
         if (dir == USB_DIR_IN) BUG(); // Buffer overflow!
-        xfer_err(intf, request_fmt, dir, value, index,
+        xfer_err(port, intf, request_fmt, dir, value, index,
                  "(%s %d byte(s) %s %zu-byte buffer)",
                  dir == USB_DIR_OUT ? "transmit read" :
                  dir == USB_DIR_IN ? "receive overflowed" : "???",
@@ -622,7 +646,7 @@ xfer(struct usb_interface *intf, uint8_t request, const char *request_fmt,
                  max_size);
         ret = -EOVERFLOW;
     } else if (unlikely((unsigned int) ret < min_size)) {
-        xfer_err(intf, request_fmt, dir, value, index,
+        xfer_err(port, intf, request_fmt, dir, value, index,
                  "(short %s, %d byte(s))",
                  dir == USB_DIR_OUT ? "write" :
                  dir == USB_DIR_IN ? "read" : "???",
@@ -633,33 +657,45 @@ xfer(struct usb_interface *intf, uint8_t request, const char *request_fmt,
 }
 
 static void
-xfer_printk(const char *level, struct usb_interface *intf,
+xfer_printk(const char *level, struct port *port, struct usb_interface *intf,
             const char *request_fmt,
             uint8_t dir, uint16_t value, uint16_t index,
             const char *detail_fmt, ...) {
-    char request_s[128], detail[128];
-    snprintf(request_s, sizeof request_s,
-             request_fmt, index, value);
+    const char *gpiodev_name = NULL, *request_s = NULL, *detail = NULL;
+    if (port != NULL && port->gc.gpiodev != NULL) {
+        struct device *gpiodev_dev = gpio_device_to_device(port->gc.gpiodev);
+        if (gpiodev_dev != NULL) {
+            gpiodev_name = dev_name(gpiodev_dev);
+        }
+    }
+    request_s = kasprintf(GFP_KERNEL, request_fmt, index, value);
+    if (request_s == NULL) goto out;
     va_list ap;
     va_start(ap, detail_fmt);
-    vsnprintf(detail, sizeof detail, detail_fmt, ap);
+    detail = kvasprintf(GFP_KERNEL, detail_fmt, ap);
     va_end(ap);
-    dev_printk(level, &intf->dev, "%s (%s) failed %s\n",
+    if (detail == NULL) goto out;
+    dev_printk(level, &intf->dev, "%s%s%s (%s) failed %s\n",
+               gpiodev_name != NULL ? gpiodev_name : "",
+               gpiodev_name != NULL ? ": " : "",
                request_s,
                dir == USB_DIR_OUT ? "OUT" :
                dir == USB_DIR_IN ? "IN" : "???",
                detail);
+ out:
+    kfree(detail);
+    kfree(request_s);
 }
 
-/* Like xfer(), but input only, into any memory (not just DMAable
-   memory).  Allocates and frees temporary dynamic memory. */
+/* Like xfer(), but input only, during board initialization, into any memory
+   (not just DMAable memory).  Allocates and frees temporary dynamic memory. */
 static inline int
 xfer2_in(struct usb_interface *intf, uint8_t request, const char *request_fmt,
          uint16_t value, uint16_t index,
          void *data, size_t min_size, size_t max_size) {
     char *buf = kzalloc(max_size, GFP_KERNEL);
     if (buf == NULL) return -ENOMEM;
-    int ret = xfer(intf, request, request_fmt, USB_DIR_IN,
+    int ret = xfer(NULL, intf, request, request_fmt, USB_DIR_IN,
                    value, index, buf, min_size, max_size);
     if (ret < 0) {
         // Error; no-op.
