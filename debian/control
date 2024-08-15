@@ -1,0 +1,16 @@
+Source: avr-usb-gpio-dkms
+Section: kernel
+Priority: optional
+Maintainer: Jean-Paul Larocque <jpl@ftlvisual.com>
+Build-Depends: debhelper (>= 9)
+Standards-Version: 4.7.0.0
+
+Package: avr-usb-gpio-dkms
+Architecture: all
+Depends: dkms, ${misc:Depends}
+Description: AVR USB GPIO driver
+ Linux kernel driver for accessing the I/O lines of an AVR USB GPIO board
+ through the standard GPIO kernel and userspace (/dev/gpiochipN) interfaces.
+ .
+ The driver is packaged as source code.  It gets built automatically for your
+ kernel using DKMS.

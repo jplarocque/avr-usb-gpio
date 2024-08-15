@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/default.mk
+
+%:
+	dh $@ --with dkms
+
+override_dh_auto_install:
+	dh_install linux include "usr/src/avr-usb-gpio-$(DEB_VERSION_UPSTREAM)/"
+
+override_dh_dkms:
+	dh_dkms -V

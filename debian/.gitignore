@@ -1,0 +1,7 @@
+.debhelper/
+avr-usb-gpio-dkms/
+*.log
+*.debhelper
+*.substvars
+debhelper-build-stamp
+files

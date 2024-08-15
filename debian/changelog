@@ -1,0 +1,5 @@
+avr-usb-gpio-dkms (0.1) unstable; urgency=medium
+
+  * Initial package
+
+ -- Jean-Paul Larocque <jpl@ftlvisual.com>  Thu, 15 Aug 2024 02:15:10 -0700

@@ -1,0 +1,7 @@
+PACKAGE_NAME="avr-usb-gpio"
+PACKAGE_VERSION="#MODULE_VERSION#"
+BUILT_MODULE_NAME[0]="gpio-avr-usb"
+BUILT_MODULE_LOCATION[0]="linux/"
+DEST_MODULE_LOCATION[0]="/kernel/drivers/gpio/"
+MAKE[0]="make -C linux"
+AUTOINSTALL="YES"
