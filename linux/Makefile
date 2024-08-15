@@ -1,15 +1,16 @@
 obj-m += gpio-avr-usb.o
 KERNELRELEASE ?= $(shell uname -r)
 KSRC ?= /lib/modules/$(KERNELRELEASE)/build
+MAKE_FLAGS := -C "$(KSRC)" M="$(CURDIR)" ccflags-y=-I"$(CURDIR)/../include"
 
 modules:
-	make -C "$(KSRC)" M="$(CURDIR)" modules
+	make $(MAKE_FLAGS) modules
 
 modules_install:
-	make -C "$(KSRC)" M="$(CURDIR)" modules modules_install
+	make $(MAKE_FLAGS) modules modules_install
 
 clean:
-	make -C "$(KSRC)" M="$(CURDIR)" clean
+	make $(MAKE_FLAGS) clean
 
 .PHONY = modules modules_install clean
 

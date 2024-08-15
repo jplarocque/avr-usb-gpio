@@ -18,8 +18,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef COMMON_H_
-#define COMMON_H_
+#ifndef _AVR_USB_GPIO_PROTOCOL_H
+#define _AVR_USB_GPIO_PROTOCOL_H
 
 enum proto_cmd {
     // IN: get array of valid I/O line masks for each port
@@ -36,4 +36,4 @@ enum proto_cmd {
     MSG_PIN,
 };
 
-#endif /* COMMON_H_ */
+#endif

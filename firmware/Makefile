@@ -2,7 +2,7 @@ DEVICE := atmega8
 F_CPU := 16000000 # in Hz
 
 CFLAGS := -Wall -Os
-CPPFLAGS := -mmcu=$(DEVICE) -Iv-usb/usbdrv -I. -DDEBUG_LEVEL=0 -DF_CPU=$(F_CPU)
+CPPFLAGS := -mmcu=$(DEVICE) -I. -I../include -Iv-usb/usbdrv -DDEBUG_LEVEL=0 -DF_CPU=$(F_CPU)
 AVRDUDE_FLAGS := -c usbasp
 
 CC := avr-gcc
@@ -51,10 +51,10 @@ main.fuse.bin: main.elf
 main.elf: main.o $(addprefix v-usb/usbdrv/,usbdrv.o usbdrvasm.o oddebug.o)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^
 
-%.o: %.c CFLAGS.var CPPFLAGS.var usbconfig.h usbidconfig.h
+%.o: %.c CFLAGS.var CPPFLAGS.var usbconfig.h ../include/usb_ids.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
-%.o: %.S CFLAGS.var CPPFLAGS.var usbconfig.h usbidconfig.h
+%.o: %.S CFLAGS.var CPPFLAGS.var usbconfig.h ../include/usb_ids.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 # Cancel implicit rules, which can mask failures in the DEPENDABLE_VAR

@@ -8,11 +8,11 @@
  * This Revision: $Id: usbconfig-prototype.h 785 2010-05-30 17:57:07Z cs $
  */
 
-#ifndef __usbconfig_h_included__
-#define __usbconfig_h_included__
+#ifndef _AVR_USB_GPIO_USBCONFIG_H
+#define _AVR_USB_GPIO_USBCONFIG_H
 
 #include <avr/io.h>
-#include "usbidconfig.h"
+#include "usb_ids.h"
 
 /* We unify hardware configuration information required both by v-usb and the
    main firmware code into this single header file.
@@ -537,4 +537,4 @@ DEFPORTREGS({&PORTA, &DDRA, &PINA},
 #  error "Unsupported device"
 #endif
 
-#endif /* __usbconfig_h_included__ */
+#endif

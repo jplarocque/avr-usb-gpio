@@ -29,8 +29,8 @@
 #include <linux/slab.h>
 #include <linux/gpio/driver.h>
 
-#include "../firmware/common.h"
-#include "../firmware/usbidconfig.h"
+#include "protocol.h"
+#include "usb_ids.h"
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Jean-Paul Larocque <jpl@ftlvisual.com>");

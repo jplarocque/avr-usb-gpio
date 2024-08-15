@@ -31,7 +31,7 @@
 #define FROM_MAIN_FIRMWARE
 #include "usbdrv.h"
 extern volatile uchar usbTxLen;
-#include "common.h"
+#include "protocol.h"
 
 #define ARRAYLEN(array) (sizeof ((array)) / sizeof ((array)[0]))
 #define MAX(x, y) ((x) >= (y) ? (x) : (y))
