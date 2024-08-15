@@ -30,6 +30,7 @@
 
 #define FROM_MAIN_FIRMWARE
 #include "usbdrv.h"
+extern volatile uchar usbTxLen;
 #include "common.h"
 
 #define ARRAYLEN(array) (sizeof ((array)) / sizeof ((array)[0]))
@@ -53,20 +54,20 @@ main(void) {
 
 usbMsgLen_t
 usbFunctionSetup(uchar data[8]) {
+    usbRequest_t *rq = (void *) data;
 #if ! USB_CFG_CHECK_CRC
     if (usbCrc16(data, 8 + 2) != 0x4FFE) {
-        return 0;
+        goto err;
     }
 #endif
     
-    usbRequest_t *rq = (void *) data;
     /* Urge GCC to allocate `data` in one of the base pointer register pairs (Y
        or Z), which are eligible for dereferencing w/ displacement.  Otherwise,
        it puts `data` in X, which doesn't have displacement, wasting 18 bytes
        on ADIW & SBIW twiddling to access the desired address. */
     asm volatile ("" : : "b" (data));
     enum proto_cmd cmd = rq->bRequest;
-    if ((rq->bmRequestType & USBRQ_TYPE_MASK) != USBRQ_TYPE_VENDOR) return 0;
+    if ((rq->bmRequestType & USBRQ_TYPE_MASK) != USBRQ_TYPE_VENDOR) goto err;
     bool dir_in = rq->bmRequestType & USBRQ_DIR_DEVICE_TO_HOST;
     static uint8_t replybuf[MAX(2U, ARRAYLEN(io_port_regs))];
     usbMsgPtr = replybuf;
@@ -85,9 +86,9 @@ usbFunctionSetup(uchar data[8]) {
     }
     
     // All other requests encode a port number in wIndex.
-    if (rq->wIndex.bytes[1] > 0) return 0;
+    if (rq->wIndex.bytes[1] > 0) goto err;
     uint8_t port_num = rq->wIndex.bytes[0];
-    if (port_num >= ARRAYLEN(io_port_valid)) return 0;
+    if (port_num >= ARRAYLEN(io_port_valid)) goto err;
     uint8_t valid_mask = io_port_valid[port_num];
     static_assert(ARRAYLEN(io_port_regs) == ARRAYLEN(io_port_valid),
                   "io_port_regs[]/io_port_valid[] length mismatch");
@@ -155,5 +156,9 @@ usbFunctionSetup(uchar data[8]) {
         break;
     }
     
-    return 0;
+ err:
+    usbTxLen = USBPID_STALL;
+    // Trick V-USB usbProcessRx() into not clamping the return value:
+    rq->wLength.word = -1;
+    return USB_NO_MSG;
 }
