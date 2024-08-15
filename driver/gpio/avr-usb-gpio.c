@@ -1,5 +1,5 @@
 /* 
- * AVR-GPIO
+ * AVR USB GPIO
  * 
  * (C) Amitesh Singh <singh.amitesh@gmail.com>, 2016
  * © 2024 Jean-Paul Larocque
@@ -34,7 +34,7 @@
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Jean-Paul Larocque <jpl@ftlvisual.com>");
-MODULE_DESCRIPTION("AVR-GPIO USB driver");
+MODULE_DESCRIPTION("AVR USB GPIO driver");
 MODULE_VERSION("0.1");
 
 /* Old versions of gpiolib can crash the system when GPIO chips are dynamically
@@ -54,14 +54,14 @@ MODULE_VERSION("0.1");
 #define RETRY_DELAY_ms 5 // FIXME: make configurable
 #define TIMEOUT_ms 100 // FIXME: make configurable
 
-struct avr_gpio_board;
-struct avr_gpio_port;
+struct board;
+struct port;
 
-struct avr_gpio_port {
+struct port {
     struct gpio_chip gc;
-    struct avr_gpio_board *board;
+    struct board *board;
     /* For identifying this port on the wire (NOT an index into .ports[] of
-       `struct avr_gpio_board`). */
+       `struct board`). */
     uint8_t id;
     /* Mask of usable I/O lines.  Used only by init_valid_mask(), where it must
        be looked up later due to the gpiolib API.  (There's no way to pass the
@@ -90,7 +90,7 @@ struct avr_gpio_port {
     int32_t actual_PORTx_DDRx;
 };
 
-struct avr_gpio_board {
+struct board {
     struct mutex lock;
     struct usb_interface *intf;
     uint8_t buf[2]; // Misc USB transfer buffer; can't be stack-allocated
@@ -98,7 +98,7 @@ struct avr_gpio_board {
     /* Array of available ports which have a non-zero number of valid I/O
        lines.  This is indexed contiguously up to .port_count (exclusively) in
        initialization order.  NEVER index by port ID. */
-    struct avr_gpio_port ports[];
+    struct port ports[];
 };
 
 static int
@@ -129,36 +129,32 @@ set_multiple(struct gpio_chip *gc, unsigned long *mask, unsigned long *bits);
 static int
 set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config);
 static int
-read_PORTx_DDRx(struct avr_gpio_port *port);
+read_PORTx_DDRx(struct port *port);
 static int
-write_PORTx_DDRx(struct avr_gpio_port *port);
+write_PORTx_DDRx(struct port *port);
 static int
-avr_gpio_msg(struct usb_interface *intf, uint8_t request,
-             const char *request_fmt, uint8_t dir,
-             uint16_t value, uint16_t index,
-             void *data, size_t min_size, size_t max_size);
+xfer(struct usb_interface *intf, uint8_t request, const char *request_fmt,
+     uint8_t dir, uint16_t value, uint16_t index,
+     void *data, size_t min_size, size_t max_size);
 static void
-avr_gpio_msg_printk(const char *level, struct usb_interface *intf,
-                    const char *request_fmt,
-                    uint8_t dir, uint16_t value, uint16_t index,
-                    const char *detail_fmt, ...);
+xfer_printk(const char *level, struct usb_interface *intf,
+            const char *request_fmt,
+            uint8_t dir, uint16_t value, uint16_t index,
+            const char *detail_fmt, ...);
 static inline int
-avr_gpio_msg2_in(struct usb_interface *intf, uint8_t request,
-                 const char *request_fmt,
-                 uint16_t value, uint16_t index,
-                 void *data, size_t min_size, size_t max_size);
+xfer2_in(struct usb_interface *intf, uint8_t request, const char *request_fmt,
+         uint16_t value, uint16_t index,
+         void *data, size_t min_size, size_t max_size);
 
-#define avr_gpio_msg_err(intf, request_fmt, dir, value, index,          \
-                         detail_fmt, ...)                               \
+#define xfer_err(intf, request_fmt, dir, value, index, detail_fmt, ...) \
     do {                                                                \
-        avr_gpio_msg_printk(KERN_ERR, (intf), (request_fmt), (dir),     \
-                            (value), (index), (detail_fmt), ##__VA_ARGS__); \
+        xfer_printk(KERN_ERR, (intf), (request_fmt), (dir),             \
+                    (value), (index), (detail_fmt), ##__VA_ARGS__);     \
     } while (false)
-#define avr_gpio_msg_warn(intf, request_fmt, dir, value, index,         \
-                          detail_fmt, ...)                              \
+#define xfer_warn(intf, request_fmt, dir, value, index, detail_fmt, ...) \
     do {                                                                \
-        avr_gpio_msg_printk(KERN_WARNING, (intf), (request_fmt), (dir), \
-                            (value), (index), (detail_fmt), ##__VA_ARGS__); \
+        xfer_printk(KERN_WARNING, (intf), (request_fmt), (dir),         \
+                    (value), (index), (detail_fmt), ##__VA_ARGS__);     \
     } while (false)
 
 static struct usb_device_id id_table[] = {
@@ -167,13 +163,13 @@ static struct usb_device_id id_table[] = {
 };
 MODULE_DEVICE_TABLE(usb, id_table);
 
-static struct usb_driver avr_gpio_driver = {
+static struct usb_driver gpio_avr_usb = {
     .name = KBUILD_MODNAME,
     .id_table = id_table,
     .probe = usb_probe,
     .disconnect = usb_disconnect,
 };
-module_usb_driver(avr_gpio_driver);
+module_usb_driver(gpio_avr_usb);
 
 static int
 usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
@@ -191,13 +187,13 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     }
     void *devg = devres_open_group(&intf->dev, NULL, GFP_KERNEL);
     if (devg == NULL) return -ENOMEM;
-    struct avr_gpio_board *board = NULL;
+    struct board *board = NULL;
     uint8_t valid_mask[MAX_PORTS], line_count[MAX_PORTS];
     /* From this point forward, all error handling must go through `goto err`
        in order to ensure matching usb_put_intf() call. */
 
-    ret = avr_gpio_msg2_in(intf, MSG_VALID_MASK, "MSG_VALID_MASK", 0, 0,
-                           valid_mask, 0, sizeof valid_mask);
+    ret = xfer2_in(intf, MSG_VALID_MASK, "MSG_VALID_MASK", 0, 0,
+                   valid_mask, 0, sizeof valid_mask);
     if (ret < 0) goto err;
     /* Number of ports as reported by the device.  port_count may end up being
        less than this value, since we prune empty ports. */
@@ -219,8 +215,8 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         goto err;
     }
 
-    ret = avr_gpio_msg2_in(intf, MSG_LINE_COUNT, "MSG_LINE_COUNT", 0, 0,
-                           line_count, 0, sizeof line_count);
+    ret = xfer2_in(intf, MSG_LINE_COUNT, "MSG_LINE_COUNT", 0, 0,
+                   line_count, 0, sizeof line_count);
     if (ret < 0) goto err;
     if (ret != dev_port_count) {
         dev_err(&intf->dev,
@@ -237,7 +233,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     mutex_init(&board->lock);
     board->intf = usb_get_intf(intf);
     board->port_count = port_count;
-    struct avr_gpio_port *port = board->ports, *ports_end = port + port_count;
+    struct port *port = board->ports, *ports_end = port + port_count;
 
     unsigned int valid_lines = 0, invalid_lines = 0;
     
@@ -354,14 +350,14 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
 static int
 init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
                 unsigned int ngpios) {
-    struct avr_gpio_port *port = gpiochip_get_data(gc);
+    struct port *port = gpiochip_get_data(gc);
     *valid_mask = port->valid_mask;
     return 0;
 }
 
 static void
 usb_disconnect(struct usb_interface *intf) {
-    struct avr_gpio_board *board = usb_get_intfdata(intf);
+    struct board *board = usb_get_intfdata(intf);
     dev_info(&intf->dev, "board removed:\n");
     for (size_t i = 0; i < board->port_count; i++) {
         dev_info(&intf->dev, "  %s\n", board->ports[i].gc.label);
@@ -382,15 +378,15 @@ request(struct gpio_chip *gc, unsigned int offset) {
 
 static int
 get_direction(struct gpio_chip *gc, unsigned int offset) {
-    struct avr_gpio_port *port = gpiochip_get_data(gc);
+    struct port *port = gpiochip_get_data(gc);
     return (port->direction & offset
             ? GPIO_LINE_DIRECTION_OUT : GPIO_LINE_DIRECTION_IN);
 }
 
 static int
 direction_input(struct gpio_chip *gc, unsigned int offset) {
-    struct avr_gpio_port *port = gpiochip_get_data(gc);
-    struct avr_gpio_board *board = port->board;
+    struct port *port = gpiochip_get_data(gc);
+    struct board *board = port->board;
     mutex_lock(&board->lock);
     // Note: `offset` has been validated by the API.
     port->direction &= ~(1U << offset);
@@ -401,8 +397,8 @@ direction_input(struct gpio_chip *gc, unsigned int offset) {
 
 static int
 direction_output(struct gpio_chip *gc, unsigned int offset, int value) {
-    struct avr_gpio_port *port = gpiochip_get_data(gc);
-    struct avr_gpio_board *board = port->board;
+    struct port *port = gpiochip_get_data(gc);
+    struct board *board = port->board;
     mutex_lock(&board->lock);
     /* Note: `offset` has been validated by the API.
        
@@ -434,8 +430,8 @@ get_multiple(struct gpio_chip *gc, unsigned long *mask, unsigned long *bits) {
 
 static int
 get_raw(struct gpio_chip *gc) {
-    struct avr_gpio_port *port = gpiochip_get_data(gc);
-    struct avr_gpio_board *board = port->board;
+    struct port *port = gpiochip_get_data(gc);
+    struct board *board = port->board;
     struct usb_interface *intf = board->intf;
     struct {
         uint8_t data;
@@ -445,9 +441,9 @@ get_raw(struct gpio_chip *gc) {
         return -ENOTRECOVERABLE;
     }
     mutex_lock(&board->lock);
-    int ret = avr_gpio_msg(intf, MSG_PIN, "MSG_PIN[%u]", USB_DIR_IN,
-                           0, port->id,
-                           buf, sizeof *buf, sizeof *buf);
+    int ret = xfer(intf, MSG_PIN, "MSG_PIN[%u]", USB_DIR_IN,
+                   0, port->id,
+                   buf, sizeof *buf, sizeof *buf);
     mutex_unlock(&board->lock);
     if (ret < 0) return ret;
     return buf->data;
@@ -461,8 +457,8 @@ set(struct gpio_chip *gc, unsigned int offset, int value) {
 
 static void
 set_multiple(struct gpio_chip *gc, unsigned long *mask, unsigned long *bits) {
-    struct avr_gpio_port *port = gpiochip_get_data(gc);
-    struct avr_gpio_board *board = port->board;
+    struct port *port = gpiochip_get_data(gc);
+    struct board *board = port->board;
     uint8_t mask_ = *mask;
     mutex_lock(&board->lock);
     port->value &= ~mask_;
@@ -473,8 +469,8 @@ set_multiple(struct gpio_chip *gc, unsigned long *mask, unsigned long *bits) {
 
 static int
 set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config) {
-    struct avr_gpio_port *port = gpiochip_get_data(gc);
-    struct avr_gpio_board *board = port->board;
+    struct port *port = gpiochip_get_data(gc);
+    struct board *board = port->board;
     uint8_t mask = 1U << offset;
     enum pin_config_param param = pinconf_to_config_param(config);
     uint32_t arg = pinconf_to_config_argument(config);
@@ -518,8 +514,8 @@ set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config) {
  */
 
 static int
-read_PORTx_DDRx(struct avr_gpio_port *port) {
-    struct avr_gpio_board *board = port->board;
+read_PORTx_DDRx(struct port *port) {
+    struct board *board = port->board;
     struct usb_interface *intf = board->intf;
     struct {
         uint8_t PORTx, DDRx;
@@ -528,9 +524,9 @@ read_PORTx_DDRx(struct avr_gpio_port *port) {
         WARN_ON(sizeof *buf > sizeof board->buf)) {
         return -ENOTRECOVERABLE;
     }
-    int ret = avr_gpio_msg(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u]", USB_DIR_IN,
-                           0, port->id,
-                           buf, sizeof *buf, sizeof *buf);
+    int ret = xfer(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u]", USB_DIR_IN,
+                   0, port->id,
+                   buf, sizeof *buf, sizeof *buf);
     if (ret < 0) return ret;
     port->direction = buf->DDRx;
     port->value = buf->PORTx;
@@ -541,18 +537,18 @@ read_PORTx_DDRx(struct avr_gpio_port *port) {
 }
 
 static int
-write_PORTx_DDRx(struct avr_gpio_port *port) {
-    struct avr_gpio_board *board = port->board;
+write_PORTx_DDRx(struct port *port) {
+    struct board *board = port->board;
     struct usb_interface *intf = board->intf;
     uint8_t
         DDRx = port->direction | (port->bias_en & port->bias_total),
         PORTx = (port->direction & port->value) | port->bias_en;
     int32_t PORTx_DDRx = PORTx | ((int32_t) DDRx << 8U);
     if (PORTx_DDRx == port->actual_PORTx_DDRx) return 0;
-    int ret = avr_gpio_msg(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u] = 0x%04X",
-                           USB_DIR_OUT,
-                           PORTx_DDRx, port->id,
-                           NULL, 0, 0);
+    int ret = xfer(intf, MSG_PORT_DDR, "MSG_PORT_DDR[%u] = 0x%04X",
+                   USB_DIR_OUT,
+                   PORTx_DDRx, port->id,
+                   NULL, 0, 0);
     if (unlikely(ret < 0)) {
         /* We don't know the device's PORTx and DDRx state, so invalidate our
            local copies to force a future update. */
@@ -564,10 +560,10 @@ write_PORTx_DDRx(struct avr_gpio_port *port) {
 }
 
 static int
-avr_gpio_msg(struct usb_interface *intf, uint8_t request,
-             const char *request_fmt, uint8_t dir,
-             uint16_t value, uint16_t index,
-             void *data, size_t min_size, size_t max_size) {
+xfer(struct usb_interface *intf, uint8_t request, const char *request_fmt,
+     uint8_t dir,
+     uint16_t value, uint16_t index,
+     void *data, size_t min_size, size_t max_size) {
     struct usb_device *udev = interface_to_usbdev(intf);
     unsigned int pipe;
     switch (dir) {
@@ -599,48 +595,48 @@ avr_gpio_msg(struct usb_interface *intf, uint8_t request,
         case ECOMM: // Received too fast
         case ENOSR: // Couldn't send fast enough
             if (tries < RETRIES) {
-                avr_gpio_msg_warn(intf, request_fmt, dir, value, index,
-                                  "(error %d, try %d); retrying",
-                                  -ret, tries);
+                xfer_warn(intf, request_fmt, dir, value, index,
+                          "(error %d, try %d); retrying",
+                          -ret, tries);
                 if (tries > 1) msleep(RETRY_DELAY_ms);
                 goto retry;
             } else {
-                avr_gpio_msg_err(intf, request_fmt, dir, value, index,
-                                 "(error %d, try %d); giving up",
-                                 -ret, tries);
+                xfer_err(intf, request_fmt, dir, value, index,
+                         "(error %d, try %d); giving up",
+                         -ret, tries);
             }
             break;
         default:
-            avr_gpio_msg_err(intf, request_fmt, dir, value, index,
+            xfer_err(intf, request_fmt, dir, value, index,
                              "(error %d)", -ret);
         }
     } else if (unlikely((unsigned int) ret > max_size)) {
         if (dir == USB_DIR_IN) BUG(); // Buffer overflow!
-        avr_gpio_msg_err(intf, request_fmt, dir, value, index,
-                         "(%s %d byte(s) %s %zu-byte buffer)",
-                         dir == USB_DIR_OUT ? "transmit read" :
-                         dir == USB_DIR_IN ? "receive overflowed" : "???",
-                         ret,
-                         dir == USB_DIR_OUT ? "from" :
-                         dir == USB_DIR_IN ? "into" : "???",
-                         max_size);
+        xfer_err(intf, request_fmt, dir, value, index,
+                 "(%s %d byte(s) %s %zu-byte buffer)",
+                 dir == USB_DIR_OUT ? "transmit read" :
+                 dir == USB_DIR_IN ? "receive overflowed" : "???",
+                 ret,
+                 dir == USB_DIR_OUT ? "from" :
+                 dir == USB_DIR_IN ? "into" : "???",
+                 max_size);
         ret = -EOVERFLOW;
     } else if (unlikely((unsigned int) ret < min_size)) {
-        avr_gpio_msg_err(intf, request_fmt, dir, value, index,
-                         "(short %s, %d byte(s))",
-                         dir == USB_DIR_OUT ? "write" :
-                         dir == USB_DIR_IN ? "read" : "???",
-                         ret);
+        xfer_err(intf, request_fmt, dir, value, index,
+                 "(short %s, %d byte(s))",
+                 dir == USB_DIR_OUT ? "write" :
+                 dir == USB_DIR_IN ? "read" : "???",
+                 ret);
         ret = -EPROTO;
     }
     return ret;
 }
 
 static void
-avr_gpio_msg_printk(const char *level, struct usb_interface *intf,
-                    const char *request_fmt,
-                    uint8_t dir, uint16_t value, uint16_t index,
-                    const char *detail_fmt, ...) {
+xfer_printk(const char *level, struct usb_interface *intf,
+            const char *request_fmt,
+            uint8_t dir, uint16_t value, uint16_t index,
+            const char *detail_fmt, ...) {
     char request_s[128], detail[128];
     snprintf(request_s, sizeof request_s,
              request_fmt, index, value);
@@ -655,17 +651,16 @@ avr_gpio_msg_printk(const char *level, struct usb_interface *intf,
                detail);
 }
 
-/* Like avr_gpio_msg(), but input only, into any memory (not just DMAable
+/* Like xfer(), but input only, into any memory (not just DMAable
    memory).  Allocates and frees temporary dynamic memory. */
 static inline int
-avr_gpio_msg2_in(struct usb_interface *intf, uint8_t request,
-                 const char *request_fmt,
-                 uint16_t value, uint16_t index,
-                 void *data, size_t min_size, size_t max_size) {
+xfer2_in(struct usb_interface *intf, uint8_t request, const char *request_fmt,
+         uint16_t value, uint16_t index,
+         void *data, size_t min_size, size_t max_size) {
     char *buf = kzalloc(max_size, GFP_KERNEL);
     if (buf == NULL) return -ENOMEM;
-    int ret = avr_gpio_msg(intf, request, request_fmt, USB_DIR_IN,
-                           value, index, buf, min_size, max_size);
+    int ret = xfer(intf, request, request_fmt, USB_DIR_IN,
+                   value, index, buf, min_size, max_size);
     if (ret < 0) {
         // Error; no-op.
     } else {

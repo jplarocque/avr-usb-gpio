@@ -1,4 +1,4 @@
-### AVR-GPIO board
+### AVR USB GPIO
 
 This is a GPIO over USB board based on the
 [V-USB](https://www.obdev.at/products/vusb/index.html) library for AVR and the
@@ -46,7 +46,7 @@ You need to load the kernel driver for this.
 
 `$ cd driver/gpio`  
 `$ make`  
-`$ sudo insmod avr-gpio.ko`  
+`$ sudo insmod avr-usb-gpio.ko`  
 `$ cd /sys/class/gpio/ `  
            `gpiochip**N**` where **N** is the value allocated by kernel   
 `$ sudo chmod 666 export unexport`  
@@ -59,7 +59,7 @@ You need to load the kernel driver for this.
 
 Before unloading the module, do $ echo **N** > unexport  
 gpio**N** gets deleted by doing so.  
-To unload the module, `$ sudo rmmod avr_gpio`  
+To unload the module, `$ sudo rmmod avr_usb_gpio`  
 
 ### How to control GPIO pins via libusb
 
