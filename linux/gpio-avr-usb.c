@@ -536,8 +536,9 @@ set_config(struct gpio_chip *gc, unsigned int offset, unsigned long config) {
 }
 
 /*
- * Low-level functions.  The mutex is not locked by these functions, so do that
- * yourself, or otherwise protect against concurrency.
+ * Low-level functions.  The caller is responsible for protecting against
+ * concurrent access to the `struct port` being operated upon, either by
+ * locking the mutex or by calling at probe time.
  */
 
 static int
@@ -619,7 +620,7 @@ xfer(struct port *port, struct usb_interface *intf,
         case ETIME: // Bus turnaround timeout
         case ETIMEDOUT: // High-level timeout
         case EPIPE: /* Endpoint stalled; firmware uses this to signal CRC
-                       mismatch */
+                       mismatch outside standard USB handshake packets */
         case ECOMM: // Received too fast
         case ENOSR: // Couldn't send fast enough
             if (tries < RETRIES) {
