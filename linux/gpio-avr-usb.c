@@ -147,6 +147,10 @@ xfer_printk(const char *level, struct port *port, struct usb_interface *intf,
             const char *request_fmt,
             uint8_t dir, uint16_t value, uint16_t index,
             const char *detail_fmt, ...);
+static void
+xfer_printk_2(const char *level, struct port *port, struct usb_interface *intf,
+              uint8_t dir, uint16_t value, uint16_t index,
+              struct va_format *detail_vaf, const char *request_fmt, ...);
 static inline int
 xfer2_in(struct usb_interface *intf, uint8_t request, const char *request_fmt,
          uint16_t value, uint16_t index,
@@ -661,30 +665,45 @@ xfer_printk(const char *level, struct port *port, struct usb_interface *intf,
             const char *request_fmt,
             uint8_t dir, uint16_t value, uint16_t index,
             const char *detail_fmt, ...) {
-    const char *gpiodev_name = NULL, *request_s = NULL, *detail = NULL;
+    va_list ap;
+    struct va_format detail_vaf = {
+        .fmt = detail_fmt,
+        .va = &ap,
+    };
+    va_start(ap, detail_fmt);
+    xfer_printk_2(level, port, intf, dir, value, index,
+                  &detail_vaf, request_fmt, index, value);
+    va_end(ap);
+}
+
+/* Hack to capture the arguments for request_fmt for use with
+   va_start()/va_end(). */
+static void
+xfer_printk_2(const char *level, struct port *port, struct usb_interface *intf,
+              uint8_t dir, uint16_t value, uint16_t index,
+              struct va_format *detail_vaf, const char *request_fmt, ...) {
+    const char *gpiodev_name = NULL;
     if (port != NULL && port->gc.gpiodev != NULL) {
         struct device *gpiodev_dev = gpio_device_to_device(port->gc.gpiodev);
         if (gpiodev_dev != NULL) {
             gpiodev_name = dev_name(gpiodev_dev);
         }
     }
-    request_s = kasprintf(GFP_KERNEL, request_fmt, index, value);
-    if (request_s == NULL) goto out;
+    
     va_list ap;
-    va_start(ap, detail_fmt);
-    detail = kvasprintf(GFP_KERNEL, detail_fmt, ap);
-    va_end(ap);
-    if (detail == NULL) goto out;
-    dev_printk(level, &intf->dev, "%s%s%s (%s) failed %s\n",
+    struct va_format request_vaf = {
+        .fmt = request_fmt,
+        .va = &ap,
+    };
+    va_start(ap, request_fmt);
+    dev_printk(level, &intf->dev, "%s%s%pV (%s) failed %pV\n",
                gpiodev_name != NULL ? gpiodev_name : "",
                gpiodev_name != NULL ? ": " : "",
-               request_s,
+               &request_vaf,
                dir == USB_DIR_OUT ? "OUT" :
                dir == USB_DIR_IN ? "IN" : "???",
-               detail);
- out:
-    kfree(detail);
-    kfree(request_s);
+               detail_vaf);
+    va_end(ap);
 }
 
 /* Like xfer(), but input only, during board initialization, into any memory
