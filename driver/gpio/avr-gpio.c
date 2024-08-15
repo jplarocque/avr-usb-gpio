@@ -48,8 +48,11 @@ MODULE_VERSION("0.1");
 /* Actual maximum is expected to be 11 (PA..PL on e.g. ATmega640, with "PI"
    skipped due to Atmel port numbering). */
 #define MAX_PORTS 25
-
-#define TIMEOUT 100
+#define RETRIES 5 // FIXME: make configurable
+/* How long to wait between retries.  Only applies after the second attempt
+   (the first retry is immediate). */
+#define RETRY_DELAY_ms 5 // FIXME: make configurable
+#define TIMEOUT_ms 100 // FIXME: make configurable
 
 struct avr_gpio_board;
 struct avr_gpio_port;
@@ -134,11 +137,29 @@ avr_gpio_msg(struct usb_interface *intf, uint8_t request,
              const char *request_fmt, uint8_t dir,
              uint16_t value, uint16_t index,
              void *data, size_t min_size, size_t max_size);
+static void
+avr_gpio_msg_printk(const char *level, struct usb_interface *intf,
+                    const char *request_fmt,
+                    uint8_t dir, uint16_t value, uint16_t index,
+                    const char *detail_fmt, ...);
 static inline int
 avr_gpio_msg2_in(struct usb_interface *intf, uint8_t request,
                  const char *request_fmt,
                  uint16_t value, uint16_t index,
                  void *data, size_t min_size, size_t max_size);
+
+#define avr_gpio_msg_err(intf, request_fmt, dir, value, index,          \
+                         detail_fmt, ...)                               \
+    do {                                                                \
+        avr_gpio_msg_printk(KERN_ERR, (intf), (request_fmt), (dir),     \
+                            (value), (index), (detail_fmt), ##__VA_ARGS__); \
+    } while (false)
+#define avr_gpio_msg_warn(intf, request_fmt, dir, value, index,         \
+                          detail_fmt, ...)                              \
+    do {                                                                \
+        avr_gpio_msg_printk(KERN_WARNING, (intf), (request_fmt), (dir), \
+                            (value), (index), (detail_fmt), ##__VA_ARGS__); \
+    } while (false)
 
 static struct usb_device_id id_table[] = {
     {USB_DEVICE(USB_VENDOR_ID, USB_DEVICE_ID)},
@@ -548,53 +569,90 @@ avr_gpio_msg(struct usb_interface *intf, uint8_t request,
              uint16_t value, uint16_t index,
              void *data, size_t min_size, size_t max_size) {
     struct usb_device *udev = interface_to_usbdev(intf);
-    bool dir_out;
     unsigned int pipe;
     switch (dir) {
     case USB_DIR_OUT:
-        dir_out = true;
         pipe = usb_sndctrlpipe(udev, 0);
         break;
     case USB_DIR_IN:
-        dir_out = false;
         pipe = usb_rcvctrlpipe(udev, 0);
         break;
     default:
         return -EINVAL;
     }
     uint8_t request_type = dir | USB_RECIP_DEVICE | USB_TYPE_VENDOR;
-    int ret = usb_control_msg(udev, pipe, request, request_type,
-                              value, index,
-                              data, min(max_size, (size_t) (uint16_t) -1),
-                              TIMEOUT);
-    char request_label[128], detail[128];
-    const char *dir_label;
+    int tries = 0, ret;
+ retry:
+    ret = usb_control_msg(udev, pipe, request, request_type,
+                          value, index,
+                          data, min(max_size, (size_t) (uint16_t) -1),
+                          TIMEOUT_ms);
+    tries++;
     if (unlikely(ret < 0)) {
-        snprintf(detail, sizeof detail, "error %d", -ret);
-        goto err;
+        switch (-ret) {
+        case EPROTO: // Bitstuff error, bus turnaround timeout, or unknown
+        case EILSEQ: // CRC error, bus turnaround timeout, or unknown
+        case ETIME: // Bus turnaround timeout
+        case ETIMEDOUT: // High-level timeout
+        case EPIPE: /* Endpoint stalled; firmware uses this to signal CRC
+                       mismatch */
+        case ECOMM: // Received too fast
+        case ENOSR: // Couldn't send fast enough
+            if (tries < RETRIES) {
+                avr_gpio_msg_warn(intf, request_fmt, dir, value, index,
+                                  "(error %d, try %d); retrying",
+                                  -ret, tries);
+                if (tries > 1) msleep(RETRY_DELAY_ms);
+                goto retry;
+            } else {
+                avr_gpio_msg_err(intf, request_fmt, dir, value, index,
+                                 "(error %d, try %d); giving up",
+                                 -ret, tries);
+            }
+            break;
+        default:
+            avr_gpio_msg_err(intf, request_fmt, dir, value, index,
+                             "(error %d)", -ret);
+        }
     } else if (unlikely((unsigned int) ret > max_size)) {
-        if (! dir_out) BUG(); // Buffer overflow!
-        snprintf(detail, sizeof detail,
-                 "%s %d byte(s) past end of buffer (%zu byte(s))",
-                 dir_out ? "transmit read" : "receive overflowed",
-                 ret, max_size);
+        if (dir == USB_DIR_IN) BUG(); // Buffer overflow!
+        avr_gpio_msg_err(intf, request_fmt, dir, value, index,
+                         "(%s %d byte(s) %s %zu-byte buffer)",
+                         dir == USB_DIR_OUT ? "transmit read" :
+                         dir == USB_DIR_IN ? "receive overflowed" : "???",
+                         ret,
+                         dir == USB_DIR_OUT ? "from" :
+                         dir == USB_DIR_IN ? "into" : "???",
+                         max_size);
         ret = -EOVERFLOW;
-        goto err;
     } else if (unlikely((unsigned int) ret < min_size)) {
-        snprintf(detail, sizeof detail, "short %s, %d byte(s)",
-                 dir_out ? "write" : "read", ret);
+        avr_gpio_msg_err(intf, request_fmt, dir, value, index,
+                         "(short %s, %d byte(s))",
+                         dir == USB_DIR_OUT ? "write" :
+                         dir == USB_DIR_IN ? "read" : "???",
+                         ret);
         ret = -EPROTO;
-        goto err;
     }
     return ret;
-    
- err:
-    snprintf(request_label, sizeof request_label,
+}
+
+static void
+avr_gpio_msg_printk(const char *level, struct usb_interface *intf,
+                    const char *request_fmt,
+                    uint8_t dir, uint16_t value, uint16_t index,
+                    const char *detail_fmt, ...) {
+    char request_s[128], detail[128];
+    snprintf(request_s, sizeof request_s,
              request_fmt, index, value);
-    dir_label = dir_out ? "OUT" : "IN";
-    dev_err(&intf->dev, "%s (%s) failed (%s)\n",
-            request_label, dir_label, detail);
-    return ret;
+    va_list ap;
+    va_start(ap, detail_fmt);
+    vsnprintf(detail, sizeof detail, detail_fmt, ap);
+    va_end(ap);
+    dev_printk(level, &intf->dev, "%s (%s) failed %s\n",
+               request_s,
+               dir == USB_DIR_OUT ? "OUT" :
+               dir == USB_DIR_IN ? "IN" : "???",
+               detail);
 }
 
 /* Like avr_gpio_msg(), but input only, into any memory (not just DMAable
