@@ -27,13 +27,9 @@
 # USB GPIO deivce, but would reconnect to the same GPIO chip at its new
 # low-level (gpiochipN) name.
 # 
-# As root, install this to /etc/udev/rules.d/, then run:
+# Install this file to /etc/udev/rules.d/, then run:
 # 
-#     systemctl reload systemd-udevd.service
-# 
-# After installation, you may also need to run `udevadm trigger /dev/gpiochipN`
-# for each GPIO device, or simply disconnect/reconnect any AVR USB GPIO
-# devices.
+#     sudo udevadm trigger
 
 ACTION=="remove", GOTO="gpio_end"
 SUBSYSTEM!="gpio", GOTO="gpio_end"
