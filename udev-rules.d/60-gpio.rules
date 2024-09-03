@@ -1,0 +1,59 @@
+# udev rules to add persistent symlinks for gpiochipN character devices into
+# subdirectories under /dev/gpio/, similar to /dev/disk/by-* and
+# /dev/serial/by-* symlinks.
+# 
+#     /dev/gpio
+#     ├── by-id
+#     │   ├── usb-ftlvisual.com_AVR_USB_GPIO-if00-PA -> ../../gpiochip0
+#     │   └── usb-ftlvisual.com_AVR_USB_GPIO-if00-PB -> ../../gpiochip1
+#     └── by-path
+#         ├── pci-0000:00:14.0-usb-0:2.4.2:1.0-chip0 -> ../../gpiochip0
+#         └── pci-0000:00:14.0-usb-0:2.4.2:1.0-chip1 -> ../../gpiochip1
+# 
+# This is helpful for reliable script/program integration, since low-level GPIO
+# character device names like "gpiochip0" can change.  For example, if a cable
+# gets wiggled or a USB hub just decides to reset a port, then the device is
+# re-enumerated and new gpiochips are added.  If some program still had
+# /dev/gpiochip0 open at the time of re-enumeration, then the old stale GPIO
+# chip will hold onto that name, making the name "gpiochip0" unavailable for
+# the new GPIO chip instance(s).  Eventually, the program will fail when it
+# tries to read or write to a GPIO line using its file descriptor for
+# gpiochip0.  When the program restarts, it won't be able to open
+# /dev/gpiochip0 since a different name was assigned for the newly-enumerated
+# GPIO chip.
+# 
+# By installing these udev rules and using the /dev/gpio/by-* symlinks in your
+# program configuration, the program will still fail upon a disconnected AVR
+# USB GPIO deivce, but would reconnect to the same GPIO chip at its new
+# low-level (gpiochipN) name.
+# 
+# As root, install this to /etc/udev/rules.d/, then run:
+# 
+#     systemctl reload systemd-udevd.service
+# 
+# After installation, you may also need to run `udevadm trigger /dev/gpiochipN`
+# for each GPIO device, or simply disconnect/reconnect any AVR USB GPIO
+# devices.
+
+ACTION=="remove", GOTO="gpio_end"
+SUBSYSTEM!="gpio", GOTO="gpio_end"
+
+# Set ID_PATH.
+IMPORT{builtin}="path_id"
+# Set other ID_* variables.
+SUBSYSTEMS=="usb", IMPORT{builtin}="usb_id"
+
+ENV{.CHIP_NAME}="$attr{chip_name}"
+ENV{.CHIP_IDX}="$attr{chip_idx}"
+
+ENV{ID_PATH}=="?*", ENV{.CHIP_IDX}=="", SYMLINK+="gpio/by-path/$env{ID_PATH}"
+ENV{ID_PATH}=="?*", ENV{.CHIP_IDX}=="?*", SYMLINK+="gpio/by-path/$env{ID_PATH}-chip$env{.CHIP_IDX}"
+
+ENV{ID_BUS}=="", GOTO="gpio_end"
+ENV{ID_SERIAL}=="", GOTO="gpio_end"
+ENV{ID_USB_INTERFACE_NUM}=="", GOTO="gpio_end"
+ENV{.CHIP_IDX}=="", ENV{.CHIP_NAME}=="", SYMLINK+="gpio/by-id/$env{ID_BUS}-$env{ID_SERIAL}-if$env{ID_USB_INTERFACE_NUM}"
+ENV{.CHIP_IDX}=="?*", ENV{.CHIP_NAME}=="", SYMLINK+="gpio/by-id/$env{ID_BUS}-$env{ID_SERIAL}-if$env{ID_USB_INTERFACE_NUM}-chip$env{.CHIP_IDX}"
+ENV{.CHIP_NAME}=="?*", SYMLINK+="gpio/by-id/$env{ID_BUS}-$env{ID_SERIAL}-if$env{ID_USB_INTERFACE_NUM}-$env{.CHIP_NAME}"
+
+LABEL="gpio_end"

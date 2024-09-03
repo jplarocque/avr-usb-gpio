@@ -1,0 +1,6 @@
+# Specific aliases by cabling path, serial number, etc.
+# 
+# FIXME: need to add serial number support for AVR USB GPIO to make this more
+# useful.
+
+#SUBSYSTEM=="gpio", ENV{ID_PATH}=="pci-0000:00:14.0-usb-0:2.4.2:1.0", SYMLINK+="gpio/by-alias/desk-$env{.CHIP_NAME}"
