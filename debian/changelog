@@ -1,3 +1,9 @@
+avr-usb-gpio-dkms (0.3) unstable; urgency=medium
+
+  * Fix incorrect type size_t in return value of sysfs show function
+
+ -- Jean-Paul Larocque <jpl@ftlvisual.com>  Tue, 03 Sep 2024 11:39:46 -0700
+
 avr-usb-gpio-dkms (0.2) unstable; urgency=medium
 
   * Add sysfs attributes for GPIO character devices

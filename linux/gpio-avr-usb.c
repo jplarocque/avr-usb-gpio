@@ -405,7 +405,7 @@ show_sysfs_attr(struct device *dev, struct device_attribute *attr,
     if (WARN_ON_ONCE(gdev == NULL)) return -ENODEV;
     struct gpio_chip *gc = gpio_device_get_chip(gdev);
     struct port *port = gpiochip_get_data(gc);
-    size_t out;
+    ssize_t out;
     if (attr == &dev_attr_chip_idx) {
         out = sysfs_emit(buf, "%u\n", port->idx);
     } else if (attr == &dev_attr_chip_id) {
