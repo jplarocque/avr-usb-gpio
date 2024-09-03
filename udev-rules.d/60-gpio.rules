@@ -18,9 +18,13 @@
 # chip will hold onto that name, making the name "gpiochip0" unavailable for
 # the new GPIO chip instance(s).  Eventually, the program will fail when it
 # tries to read or write to a GPIO line using its file descriptor for
-# gpiochip0.  When the program restarts, it won't be able to open
-# /dev/gpiochip0 since a different name was assigned for the newly-enumerated
-# GPIO chip.
+# gpiochip0.
+# 
+# If the program is configured to access /dev/gpiochip0, then when it restarts,
+# it won't be able to open /dev/gpiochip0, since a different name was assigned
+# for the newly-enumerated GPIO chip.  This condition would persist
+# indefinitely (until another re-enumeration), nomatter how many times the
+# program is restarted.
 # 
 # By installing these udev rules and using the /dev/gpio/by-* symlinks in your
 # program configuration, the program will still fail upon a disconnected AVR
