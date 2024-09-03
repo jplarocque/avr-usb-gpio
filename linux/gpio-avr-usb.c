@@ -60,6 +60,8 @@ struct port;
 struct port {
     struct gpio_chip gc;
     struct board *board;
+    /* Sequential port number (index into .ports[] of `struct board`). */
+    uint8_t idx;
     /* For identifying this port on the wire (NOT an index into .ports[] of
        `struct board`). */
     uint8_t id;
@@ -106,6 +108,11 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id);
 static int
 init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
                 unsigned int ngpios);
+static ssize_t
+show_sysfs_attr(struct device *dev, struct device_attribute *attr,
+                char *buf);
+static int
+gpio_chip_match_device(struct gpio_chip *gc, const void *data);
 static void
 summarize_gpiochip_info(struct gpio_chip *gc,
                         char *names, size_t names_size,
@@ -245,10 +252,8 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     mutex_init(&board->lock);
     board->intf = usb_get_intf(intf);
     board->port_count = port_count;
-    struct port *port = board->ports, *ports_end = port + port_count;
-
+    size_t port_idx = 0;
     unsigned int valid_lines = 0, invalid_lines = 0;
-    
     // FIXME: ensure USB path and board serial number info get printed here
     dev_info(&intf->dev, "adding board:\n");
     for (size_t port_id = 0; port_id < dev_port_count; port_id++) {
@@ -268,7 +273,8 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
             ret = -EPROTO;
             goto err;
         }
-        if (WARN(port == ports_end, "Exceeded allocated ports\n")) {
+
+        if (WARN(port_idx >= port_count, "Exceeded allocated ports\n")) {
             ret = -ENOTRECOVERABLE;
             goto err;
         }
@@ -278,6 +284,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         // "PI" is skipped by Atmel in their port numbering.
         if (port_letter >= 'I') port_letter++;
         
+        struct port *port = board->ports + port_idx;
         port->gc.label = devm_kasprintf(&intf->dev, GFP_KERNEL,
                                         "P%c", port_letter);
         if (port->gc.label == NULL) goto nomem;
@@ -304,6 +311,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
         port->gc.names = names;
         
         port->board = board;
+        port->idx = port_idx;
         port->id = port_id;
         port->valid_mask = valid_mask[port_id];
         ret = read_PORTx_DDRx(port);
@@ -326,7 +334,7 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
                  dev_name(gpio_device_to_device(port->gc.gpiodev)),
                  port->gc.label, names_concat);
         
-        port++;
+        port_idx++;
     }
     dev_info(&intf->dev,
              "%zu port(s), %u line(s) available, %u line(s) reserved\n",
@@ -344,12 +352,77 @@ usb_probe(struct usb_interface *intf, const struct usb_device_id *id) {
     return ret;
 }
 
+static struct device_attribute
+dev_attr_chip_idx = __ATTR(chip_idx, S_IRUGO, show_sysfs_attr, NULL),
+dev_attr_chip_id = __ATTR(chip_id, S_IRUGO, show_sysfs_attr, NULL),
+dev_attr_chip_name = __ATTR(chip_name, S_IRUGO, show_sysfs_attr, NULL);
+static struct attribute *avr_usb_gpio_attrs[] = {
+    &dev_attr_chip_idx.attr,
+    &dev_attr_chip_id.attr,
+    &dev_attr_chip_name.attr,
+    NULL,
+};
+ATTRIBUTE_GROUPS(avr_usb_gpio);
+
 static int
 init_valid_mask(struct gpio_chip *gc, unsigned long *valid_mask,
                 unsigned int ngpios) {
     struct port *port = gpiochip_get_data(gc);
     *valid_mask = port->valid_mask;
+
+    /* It's kind of a hack to put this here: gc->init_valid_mask() is one of
+       the few places we can hook between gc->gpiodev initialization and
+       device_initialize().  However, there's not really anything in the API
+       that seems to assure this behavior.  It'd be better if `struct
+       gpio_chip` had some explicit pre-initialize hook function pointer. */
+    struct device *gpiodev_dev = gpio_device_to_device(gc->gpiodev);
+    gpiodev_dev->groups = avr_usb_gpio_groups;
+    
     return 0;
+}
+
+static ssize_t
+show_sysfs_attr(struct device *dev, struct device_attribute *attr,
+                char *buf) {
+    /* We need to use `dev` to look up the correct `struct port` in order to
+       find the port number.
+       
+         - We can't use the (perfect) function to_gpio_device() to get closer
+           by finding the owning `struct gpio_device`, since it's statically
+           defined in a private header.
+         
+         - We can't use container_of(dev, struct gpio_device, dev) to get
+           closer by finding the owning `struct gpio_device`, since the layout
+           of `struct gpio_device` is hidden in a private header.
+         
+         - We could use dev_set_drvdata()/dev_get_drvdata(), but since we don't
+           own the `struct device` (gpiolib does), this would be foolish.
+         
+         - Therefore, we need to use the pointer value `dev` as a lookup key in
+           a global search.
+    */
+    struct gpio_device *gdev = gpio_device_find(dev, gpio_chip_match_device);
+    if (WARN_ON_ONCE(gdev == NULL)) return -ENODEV;
+    struct gpio_chip *gc = gpio_device_get_chip(gdev);
+    struct port *port = gpiochip_get_data(gc);
+    size_t out;
+    if (attr == &dev_attr_chip_idx) {
+        out = sysfs_emit(buf, "%u\n", port->idx);
+    } else if (attr == &dev_attr_chip_id) {
+        out = sysfs_emit(buf, "%u\n", port->id);
+    } else if (attr == &dev_attr_chip_name) {
+        out = sysfs_emit(buf, "%s\n", port->gc.label);
+    } else {
+        out = -EINVAL;
+    }
+    gpio_device_put(gdev);
+    return out;
+}
+
+static int
+gpio_chip_match_device(struct gpio_chip *gc, const void *data) {
+    const struct device *dev = data;
+    return gpio_device_to_device(gc->gpiodev) == dev;
 }
 
 static void
