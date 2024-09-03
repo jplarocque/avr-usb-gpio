@@ -13,7 +13,7 @@
 # This is helpful for reliable script/program integration, since low-level GPIO
 # character device names like "gpiochip0" can change.  For example, if a cable
 # gets wiggled or a USB hub just decides to reset a port, then the device is
-# re-enumerated and new gpiochips are added.  If some program still had
+# re-enumerated and new GPIO chips are added.  If some program still had
 # /dev/gpiochip0 open at the time of re-enumeration, then the old stale GPIO
 # chip will hold onto that name, making the name "gpiochip0" unavailable for
 # the new GPIO chip instance(s).  Eventually, the program will fail when it
@@ -24,7 +24,7 @@
 # 
 # By installing these udev rules and using the /dev/gpio/by-* symlinks in your
 # program configuration, the program will still fail upon a disconnected AVR
-# USB GPIO deivce, but would reconnect to the same GPIO chip at its new
+# USB GPIO device, but would reconnect to the same GPIO chip at its new
 # low-level (gpiochipN) name.
 # 
 # Install this file to /etc/udev/rules.d/, then run:
