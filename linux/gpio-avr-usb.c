@@ -552,7 +552,8 @@ get_raw(struct gpio_chip *gc) {
 
 static void
 set(struct gpio_chip *gc, unsigned int offset, int value) {
-    unsigned long mask = 1U << offset, bits = (!!value) << offset;
+    unsigned long mask = 1U << offset,
+        bits = (unsigned int) (!!value) << offset;
     set_multiple(gc, &mask, &bits);
 }
 
