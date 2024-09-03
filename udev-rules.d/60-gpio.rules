@@ -1,4 +1,4 @@
-# udev rules to add persistent symlinks for gpiochipN character devices into
+# udev rules to add persistent symlinks for gpiochipN character devices to
 # subdirectories under /dev/gpio/, similar to /dev/disk/by-* and
 # /dev/serial/by-* symlinks.
 # 
