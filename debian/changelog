@@ -1,3 +1,9 @@
+avr-usb-gpio-dkms (0.4) unstable; urgency=medium
+
+  * Fix get_direction(), which previously returned incorrect results
+
+ -- Jean-Paul Larocque <jpl@ftlvisual.com>  Tue, 03 Sep 2024 12:52:32 -0700
+
 avr-usb-gpio-dkms (0.3) unstable; urgency=medium
 
   * Fix incorrect type size_t in return value of sysfs show function
