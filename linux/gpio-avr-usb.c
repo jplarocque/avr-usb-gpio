@@ -479,7 +479,8 @@ request(struct gpio_chip *gc, unsigned int offset) {
 static int
 get_direction(struct gpio_chip *gc, unsigned int offset) {
     struct port *port = gpiochip_get_data(gc);
-    return (port->direction & offset
+    // Note: `offset` has been validated by the API.
+    return (port->direction & (1U << offset)
             ? GPIO_LINE_DIRECTION_OUT : GPIO_LINE_DIRECTION_IN);
 }
 
