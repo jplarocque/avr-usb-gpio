@@ -180,7 +180,7 @@ sudo dpkg -i ../avr-usb-gpio-dkms_*_all.deb
 Now try the module:
 
 ```sh
-modprobe gpio-avr-usb
+sudo modprobe gpio-avr-usb
 ```
 
 If all goes well, you should see something like this in
