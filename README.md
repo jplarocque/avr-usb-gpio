@@ -112,7 +112,8 @@ includes ATtiny4/5/9/10, ATtiny441/841, ATtiny828, and ATtiny1634.
 Choose which pins to use for USB D- and D+.  Ideally try to put D+ on INT0 or
 INT1, but since no other interrupts are used in the firmware, resorting to a
 pin-change interrupt is fine (as is done for ATtiny24/44/84[A]).  I think V-USB
-also making D- trigger the interrupt rather than D+, but I haven't tested this.
+also supports interrupts which are triggered by edges on the D- line rather
+than D+, but I haven't tested this.
 
 Edit `usbconfig.h` to add support for the model using C preprocessor
 conditionals.  Refer to the existing code to see how to specify:
@@ -130,7 +131,7 @@ Linux Driver
 
 Module name: `gpio-avr-usb`  
 Minimum required kernel version: 6.8  
-Minimum recommended: 6.9
+Minimum recommended kernel version: 6.9
 
 Manual Build
 ------------
@@ -147,12 +148,12 @@ DKMS Package
 ------------
 
 To arrange for your system to automatically build the kernel module for any
-kernel version you install in the future (i.e. for kernel updates), you can use
-the included DKMS configuration.
+kernel version you install in the future (i.e. for security updates), you can
+use the included DKMS configuration.
 
-For Debian and Debian-based distributions, this is made easy with the included
-Debian source package `avr-usb-gpio-dkms`.  First, make sure you have an
-appropriate `linux-headers-*` metapackage installed which matches the kernel
+For Debian and Debian-based distributions, this is easy to set up with the
+included Debian source package `avr-usb-gpio-dkms`.  First, make sure you have
+an appropriate `linux-headers-*` metapackage installed which matches the
 `linux-image-*` metapackage you run.  For example, if you use the
 `kernel-image-amd64` metapackage, then install `kernel-headers-amd64`.  If you
 are using a kernel image metapackage from Debian Backports, then be sure to
@@ -177,7 +178,7 @@ Install the package:
 sudo dpkg -i ../avr-usb-gpio-dkms_*_all.deb
 ```
 
-Now try the module:
+Now try loading the module:
 
 ```sh
 sudo modprobe gpio-avr-usb
@@ -263,18 +264,19 @@ re-enumerated and new GPIO chips are added.  If some program still had
 `/dev/gpiochip0` open at the time of re-enumeration, then the old stale GPIO
 chip will hold onto that name, making the name `gpiochip0` unavailable for the
 new GPIO chip instance(s).  Eventually, the program will fail when it tries to
-read or write to a GPIO line using its file descriptor for `gpiochip0`.
+read from or write to a GPIO line using its open file descriptor for
+`gpiochip0`.
 
 If the program is configured to access `/dev/gpiochip0`, then when it restarts,
 it won't be able to open `/dev/gpiochip0`, since a different name was assigned
 for the newly-enumerated GPIO chip.  This condition would persist indefinitely
-(until another re-enumeration), nomatter how many times the program is
+(until another re-enumeration), regardless of how many times the program is
 restarted.
 
-By installing these udev rules and using the `/dev/gpio/by-*` symlinks in your
-program configuration, the program will still fail upon a disconnected AVR USB
-GPIO device, but would reconnect to the same GPIO chip at its new low-level
-(`gpiochipN`) name.
+By installing these udev rules, and configuring your program to open GPIO
+character devices through the `/dev/gpio/by-*` symlinks, your program will
+still fail in this scenario upon a disconnected AVR USB GPIO device, but should
+be able to re-open the same GPIO device at its new low-level (`gpiochipN`) name.
 
 Rule Installation
 -----------------
